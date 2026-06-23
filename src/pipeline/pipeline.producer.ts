@@ -1,0 +1,72 @@
+import { InjectQueue } from '@nestjs/bullmq';
+import { Inject, Injectable } from '@nestjs/common';
+import { Queue } from 'bullmq';
+import { APP_ENV } from '../config/app-config.module';
+import { EnvVars } from '../config/env.validation';
+import {
+  ENRICH_TICKET_JOB,
+  PIPELINE_QUEUE,
+  PipelineJobData,
+} from './pipeline.constants';
+
+/**
+ * Enqueues pipeline jobs. Two enqueue modes, deliberately different on jobId:
+ *
+ *  - enqueue():  jobId = idempotency key. BullMQ ignores a duplicate add for an
+ *    existing jobId, so re-driving ingestion for the same key cannot create a
+ *    second pipeline run. Idempotent by construction.
+ *
+ *  - enqueueReplay(): jobId = "<key>:replay:<deadLetterId>" — a fresh id so the
+ *    job actually re-runs (a duplicate of the original key would be suppressed).
+ *    Correctness still holds because the *work* keys off data.idempotencyKey: the
+ *    ticket already exists and the outbox dedups, so a replay neither duplicates
+ *    the ticket nor the side effect.
+ */
+@Injectable()
+export class PipelineProducer {
+  constructor(
+    @InjectQueue(PIPELINE_QUEUE) private readonly queue: Queue<PipelineJobData>,
+    @Inject(APP_ENV) private readonly env: EnvVars,
+  ) {}
+
+  async enqueue(data: PipelineJobData): Promise<string> {
+    const job = await this.queue.add(ENRICH_TICKET_JOB, data, {
+      jobId: data.idempotencyKey,
+      attempts: this.env.PIPELINE_MAX_ATTEMPTS,
+      backoff: { type: 'custom' },
+      removeOnComplete: { age: 3600, count: 1000 },
+      // Keep failed jobs briefly for inspection; the durable record is the PG DLQ.
+      removeOnFail: { age: 86400 },
+    });
+    return String(job.id);
+  }
+
+  async enqueueReplay(
+    data: PipelineJobData,
+    deadLetterId: string,
+  ): Promise<string> {
+    const job = await this.queue.add(
+      ENRICH_TICKET_JOB,
+      { ...data, replayOfDeadLetterId: deadLetterId },
+      {
+        jobId: `${data.idempotencyKey}:replay:${deadLetterId}`,
+        attempts: this.env.PIPELINE_MAX_ATTEMPTS,
+        backoff: { type: 'custom' },
+        removeOnComplete: { age: 3600, count: 1000 },
+        removeOnFail: { age: 86400 },
+      },
+    );
+    return String(job.id);
+  }
+
+  /** Job counts by state, for the queue-depth gauge. */
+  getJobCounts() {
+    return this.queue.getJobCounts(
+      'waiting',
+      'active',
+      'delayed',
+      'failed',
+      'completed',
+    );
+  }
+}

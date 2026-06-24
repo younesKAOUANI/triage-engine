@@ -59,6 +59,25 @@ export class PipelineProducer {
     return String(job.id);
   }
 
+  /**
+   * Schedule a delayed re-enrichment to upgrade a DEGRADED ticket once the AI may
+   * have recovered. The delay (with jitter, computed by the caller) is what
+   * decouples recovery from breaker state and avoids a thundering herd: each
+   * degraded ticket retries on its own staggered schedule. The jobId includes the
+   * attempt number so successive upgrade attempts each actually run.
+   */
+  async enqueueUpgrade(data: PipelineJobData, delayMs: number): Promise<string> {
+    const job = await this.queue.add(ENRICH_TICKET_JOB, data, {
+      jobId: `${data.idempotencyKey}:upgrade:${data.upgradeAttempt ?? 1}`,
+      delay: delayMs,
+      attempts: this.env.PIPELINE_MAX_ATTEMPTS,
+      backoff: { type: 'custom' },
+      removeOnComplete: { age: 3600, count: 1000 },
+      removeOnFail: { age: 86400 },
+    });
+    return String(job.id);
+  }
+
   /** Job counts by state, for the queue-depth gauge. */
   getJobCounts() {
     return this.queue.getJobCounts(

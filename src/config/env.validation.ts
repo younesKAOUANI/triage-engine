@@ -51,6 +51,15 @@ export const envSchema = z.object({
   MISTRAL_MODEL: z.string().min(1).default('mistral-small-latest'),
   MISTRAL_TIMEOUT_MS: z.coerce.number().int().min(100).default(10000),
   MISTRAL_MAX_RETRIES: z.coerce.number().int().min(0).default(2),
+  // Override the SDK base URL — lets tests point the real client at a mock HTTP
+  // server (so only the HTTP boundary is faked, nothing internal).
+  MISTRAL_SERVER_URL: z.string().url().optional(),
+
+  // Graceful-degradation re-enrichment: a DEGRADED ticket is re-queued on a
+  // delay to attempt an AI upgrade later (decoupled from breaker state to avoid a
+  // recovery stampede — see ADR-0005).
+  ENRICHMENT_UPGRADE_MAX_ATTEMPTS: z.coerce.number().int().min(0).default(5),
+  ENRICHMENT_UPGRADE_BACKOFF_MS: z.coerce.number().int().min(1000).default(30000),
 
   // Circuit breaker (opossum)
   CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENT: z.coerce
@@ -60,7 +69,8 @@ export const envSchema = z.object({
     .max(100)
     .default(50),
   CIRCUIT_BREAKER_VOLUME_THRESHOLD: z.coerce.number().int().min(1).default(5),
-  CIRCUIT_BREAKER_TIMEOUT_MS: z.coerce.number().int().min(100).default(10000),
+  // Backstop above the client's AbortController timeout, so the client aborts first.
+  CIRCUIT_BREAKER_TIMEOUT_MS: z.coerce.number().int().min(100).default(12000),
   CIRCUIT_BREAKER_RESET_MS: z.coerce.number().int().min(1000).default(30000),
 });
 

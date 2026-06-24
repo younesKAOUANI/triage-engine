@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest # ships with Docker, which Testcontainers needs
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (strict)
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # Integration tests spin real Postgres + Redis via Testcontainers and mock
+      # only the Mistral/webhook HTTP boundaries — the same suite that runs locally.
+      - name: Integration tests
+        run: npm test

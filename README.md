@@ -1,5 +1,8 @@
 # Triage Engine — an idempotent job-processing engine with AI enrichment
 
+<!-- Replace OWNER/REPO with your GitHub slug once the repo is pushed. -->
+[![ci](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+
 A production-grade event-processing engine (NestJS + Postgres + Redis/BullMQ) that
 ingests support tickets, runs them through a resilient pipeline, and enriches them
 with an LLM classification. **The AI is the small part. The engineering around it
@@ -29,6 +32,7 @@ patterns:
 | A job that exhausts retries vanishing | Durable DLQ table with full error context + replay endpoint | [0007](docs/adr/0007-durable-dlq-table.md) |
 | A ticket dropped because the AI is down | Graceful degradation: rule-based fallback now, AI upgrade re-queued later | [0005](docs/adr/0005-ai-failure-handling.md) / [0006](docs/adr/0006-fallback-classifier.md) |
 | Bad/garbage model output persisted | Every response zod-validated; failure treated as transient → retry → breaker → fallback | [0005](docs/adr/0005-ai-failure-handling.md) |
+| A ticket stuck DEGRADED if its upgrade job is lost | Reconciliation sweep re-drives stale DEGRADED tickets (DB is the source of truth) | [0009](docs/adr/0009-degraded-reconciliation-sweep.md) |
 
 ## Architecture
 
@@ -82,6 +86,12 @@ so one id traces a ticket end-to-end.
   on any failure the ticket degrades to a rule-based classification and is
   re-queued to upgrade to AI later. The AI is never on the critical path for
   *availability*, only *quality*. → [ADR-0003](docs/adr/0003-circuit-breaker.md) · [ADR-0005](docs/adr/0005-ai-failure-handling.md) · [ADR-0006](docs/adr/0006-fallback-classifier.md)
+- **Self-healing reconciliation** — a sweep treats Postgres as the source of
+  truth and re-drives any ticket left stranded in DEGRADED (lost upgrade job,
+  crash, or exhausted attempts), closing the one path that could otherwise stay
+  silently degraded. → [ADR-0009](docs/adr/0009-degraded-reconciliation-sweep.md)
+
+All nine decisions are recorded as ADRs — see [`docs/adr/`](docs/adr/).
 
 ## API
 
@@ -117,8 +127,12 @@ Honest about what I'd add at scale and what I deliberately did not build:
 - **Backpressure & partitioning.** No ingress backpressure or per-tenant queue
   partitioning yet; both matter once one noisy tenant can starve others.
 - **Batching enrichment.** LLM calls are per-ticket; batching would cut cost/latency.
-- **Multi-region outbox / exactly-once illusion**, and a small ingestion→enqueue
-  reconciliation sweep for the (idempotent, safe) window between commit and enqueue.
+- **Multi-region outbox / exactly-once illusion**, and an ingestion→enqueue
+  reconciliation for the (idempotent, safe) window between commit and enqueue —
+  the analogue, on the ingestion side, of the DEGRADED sweep
+  ([ADR-0009](docs/adr/0009-degraded-reconciliation-sweep.md)) that is already built.
+- **Reconciliation at scale.** The DEGRADED sweep runs on every instance; an
+  advisory-lock/leader guard would stop the scan being duplicated across replicas.
 
 ---
 

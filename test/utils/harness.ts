@@ -71,6 +71,11 @@ export async function startHarness(): Promise<Harness> {
     CIRCUIT_BREAKER_RESET_MS: '1000',
     ENRICHMENT_UPGRADE_BACKOFF_MS: '1000',
     ENRICHMENT_UPGRADE_MAX_ATTEMPTS: '5',
+    // Sweep never auto-fires during a test (huge interval); tests call sweep()
+    // directly. Age threshold 0 so any DEGRADED ticket is eligible immediately.
+    RECONCILE_SWEEP_INTERVAL_MS: '600000',
+    RECONCILE_DEGRADED_AFTER_MS: '0',
+    RECONCILE_BATCH_SIZE: '50',
   });
 
   const moduleRef = await Test.createTestingModule({

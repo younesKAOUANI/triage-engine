@@ -61,6 +61,12 @@ export const envSchema = z.object({
   ENRICHMENT_UPGRADE_MAX_ATTEMPTS: z.coerce.number().int().min(0).default(5),
   ENRICHMENT_UPGRADE_BACKOFF_MS: z.coerce.number().int().min(1000).default(30000),
 
+  // Reconciliation sweep (ADR-0009): periodically re-drives tickets stuck DEGRADED
+  // (lost upgrade job, crash, or exhausted attempts) so none stays degraded forever.
+  RECONCILE_SWEEP_INTERVAL_MS: z.coerce.number().int().min(1000).default(60000),
+  RECONCILE_DEGRADED_AFTER_MS: z.coerce.number().int().min(0).default(300000),
+  RECONCILE_BATCH_SIZE: z.coerce.number().int().min(1).default(50),
+
   // Circuit breaker (opossum)
   CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENT: z.coerce
     .number()

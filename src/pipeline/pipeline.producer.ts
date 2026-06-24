@@ -78,6 +78,25 @@ export class PipelineProducer {
     return String(job.id);
   }
 
+  /**
+   * Re-drive a ticket stranded in DEGRADED (ADR-0009). The per-ticket jobId
+   * collapses overlapping sweeps to one in-flight reconcile per ticket; a short
+   * removeOnComplete lets a later sweep re-drive it if it's still degraded. The
+   * job restarts the normal upgrade chain (no upgradeAttempt set).
+   */
+  async enqueueReconcile(data: PipelineJobData): Promise<string> {
+    const job = await this.queue.add(ENRICH_TICKET_JOB, data, {
+      // 3 colon-separated parts: BullMQ only permits ':' in a custom jobId when it
+      // splits into exactly 3 (legacy repeatable-job compatibility).
+      jobId: `${data.idempotencyKey}:reconcile:0`,
+      attempts: this.env.PIPELINE_MAX_ATTEMPTS,
+      backoff: { type: 'custom' },
+      removeOnComplete: { age: 30 },
+      removeOnFail: { age: 86400 },
+    });
+    return String(job.id);
+  }
+
   /** Job counts by state, for the queue-depth gauge. */
   getJobCounts() {
     return this.queue.getJobCounts(

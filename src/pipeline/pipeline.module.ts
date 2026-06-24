@@ -13,6 +13,7 @@ import { DeadLetterEntity } from './dlq/entities/dead-letter.entity';
 import { PipelineObserver } from './pipeline.observer';
 import { PipelineProducer } from './pipeline.producer';
 import { PIPELINE_QUEUE } from './pipeline.constants';
+import { ReconcileSweeper } from './reconcile.sweeper';
 import { TicketProcessor } from './ticket.processor';
 
 @Module({
@@ -36,7 +37,8 @@ import { TicketProcessor } from './ticket.processor';
     TicketProcessor,
     DlqService,
     PipelineObserver,
+    ReconcileSweeper,
   ],
-  exports: [PipelineProducer],
+  exports: [PipelineProducer, ReconcileSweeper],
 })
 export class PipelineModule {}

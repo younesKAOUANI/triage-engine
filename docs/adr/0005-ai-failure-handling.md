@@ -61,8 +61,8 @@ Layered resilience around the call, plus a degrade-now / upgrade-later contract.
 - **Negative / accepted**:
   - Upgrade attempts are capped; a ticket can remain permanently DEGRADED if the AI
     is down longer than the cap allows. It is **not lost** — it keeps its fallback
-    classification — but it won't be retried forever. A periodic sweep for
-    long-DEGRADED tickets is a noted next step (README "Limitations").
+    classification — and the reconciliation sweep (ADR-0009) re-drives it, so it is
+    retried again once the AI recovers.
   - There is a tiny window between the state-change commit and the upgrade
     re-enqueue; a crash there leaves a DEGRADED ticket without a scheduled upgrade.
-    Acceptable (the ticket is usable), and recoverable by the same sweep.
+    Acceptable (the ticket is usable), and recovered by the sweep (ADR-0009).

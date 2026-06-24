@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import { PipelineProducer } from '../src/pipeline/pipeline.producer';
+import { ReconcileSweeper } from '../src/pipeline/reconcile.sweeper';
 import { Harness, startHarness, waitFor } from './utils/harness';
 
 /**
@@ -126,12 +127,18 @@ describe('Triage engine (integration)', () => {
         { timeoutMs: 15000 },
       );
 
-      const rows = await h.dataSource.query(
-        `SELECT status, attempts FROM outbox_messages WHERE dedup_key = $1`,
-        [dedupKey],
+      // The relay marks SENT just after the dispatch returns; poll for it rather
+      // than reading once (avoids racing the commit).
+      const row = await waitFor(
+        () =>
+          h.dataSource
+            .query(`SELECT status, attempts FROM outbox_messages WHERE dedup_key = $1`, [dedupKey])
+            .then((r) => r[0]),
+        (r) => r?.status === 'SENT',
+        { timeoutMs: 15000 },
       );
-      expect(rows[0].status).toBe('SENT');
-      expect(rows[0].attempts).toBeGreaterThanOrEqual(2);
+      expect(row.status).toBe('SENT');
+      expect(row.attempts).toBeGreaterThanOrEqual(2);
     });
   });
 
@@ -279,6 +286,34 @@ describe('Triage engine (integration)', () => {
 
       // Double replay is rejected.
       await request(h.http).post(`/dlq/${dlId}/replay`).expect(409);
+    });
+  });
+
+  // ── Reconciliation sweep (ADR-0009) ──────────────────────────────────────────
+  describe('reconciliation', () => {
+    it('re-drives a ticket whose upgrade job was lost', async () => {
+      // Degrade a ticket, then simulate a lost upgrade chain by wiping the queue
+      // (as a Redis flush or crash would) — nothing is scheduled to fix it now.
+      h.mistral.setMode('fail');
+      const res = await post(sampleBody, 'k-reconcile').expect(202);
+      const id = res.body.ticketId;
+      await waitFor(
+        () => getTicket(id).then((r) => r.body),
+        (t) => t.enrichment.status === 'DEGRADED',
+      );
+      await h.queue.obliterate({ force: true });
+
+      // AI recovers, but only the sweep can rescue this ticket now.
+      h.mistral.setMode('ok');
+      const swept = await h.app.get(ReconcileSweeper).sweep();
+      expect(swept).toBeGreaterThanOrEqual(1);
+
+      const upgraded = await waitFor(
+        () => getTicket(id).then((r) => r.body),
+        (t) => t.enrichment.status === 'ENRICHED' && t.enrichment.source === 'AI',
+        { timeoutMs: 15000 },
+      );
+      expect(upgraded.enrichment.source).toBe('AI');
     });
   });
 });

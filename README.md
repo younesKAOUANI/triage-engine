@@ -27,7 +27,8 @@ patterns:
 | A committed state change whose notification never fires | Transactional outbox: side effect written in the same transaction as the state change | [0004](docs/adr/0004-outbox-pattern.md) |
 | A side effect lost between commit and HTTP call | Outbox relay: at-least-once dispatch, `FOR UPDATE SKIP LOCKED` poll | [0008](docs/adr/0008-outbox-relay-polling.md) |
 | A job that exhausts retries vanishing | Durable DLQ table with full error context + replay endpoint | [0007](docs/adr/0007-durable-dlq-table.md) |
-| A ticket dropped because the AI is down | Graceful degradation: rule-based fallback now, AI upgrade re-queued *(AI layer)* | 0005 / 0006 *(next phase)* |
+| A ticket dropped because the AI is down | Graceful degradation: rule-based fallback now, AI upgrade re-queued later | [0005](docs/adr/0005-ai-failure-handling.md) / [0006](docs/adr/0006-fallback-classifier.md) |
+| Bad/garbage model output persisted | Every response zod-validated; failure treated as transient → retry → breaker → fallback | [0005](docs/adr/0005-ai-failure-handling.md) |
 
 ## Architecture
 
@@ -76,9 +77,11 @@ so one id traces a ticket end-to-end.
 - **Durable DLQ over Redis's failed set.** Exhausted jobs land in a queryable
   Postgres table with full context; replay re-enters through the **same idempotency
   key**, so it cannot duplicate a ticket or a side effect. → [ADR-0007](docs/adr/0007-durable-dlq-table.md)
-- **AI failure handling & a rule-based fallback** — circuit breaker, timeout,
-  retry-with-jitter, and graceful degradation. → ADRs 0003 / 0005 / 0006, **landing
-  with the AI layer (next phase).**
+- **AI failure handling & a rule-based fallback** — every Mistral call is
+  timed out, retried with jitter, wrapped in a circuit breaker, and zod-validated;
+  on any failure the ticket degrades to a rule-based classification and is
+  re-queued to upgrade to AI later. The AI is never on the critical path for
+  *availability*, only *quality*. → [ADR-0003](docs/adr/0003-circuit-breaker.md) · [ADR-0005](docs/adr/0005-ai-failure-handling.md) · [ADR-0006](docs/adr/0006-fallback-classifier.md)
 
 ## API
 
@@ -94,12 +97,12 @@ so one id traces a ticket end-to-end.
 
 ## Build status
 
-This repo is built incrementally. The **core engine is complete and verified
-end-to-end against real Postgres + Redis** (idempotency race, pipeline, DLQ +
-replay, outbox relay). The **AI enrichment layer** (Mistral client, JSON-mode
-validation, circuit breaker, retry-with-jitter, rule-based fallback) is the next
-phase; the pipeline currently uses a placeholder enricher behind a swappable
-`ENRICHER` token, so adding the AI is a provider swap, not surgery.
+Core engine **and** AI enrichment layer are complete and verified end-to-end
+against real Postgres + Redis (and a mock Mistral HTTP boundary): idempotency
+race, pipeline, DLQ + replay, outbox relay, AI success, graceful degradation,
+circuit-breaker open/half-open/close, and the degrade-then-upgrade flow with its
+distinct side effect. The enricher sits behind a swappable `ENRICHER` token, so
+the AI plugged in as a provider swap with no change to the pipeline.
 
 ## Limitations & next steps
 
@@ -169,10 +172,33 @@ The demo stack runs them on boot (`DB_RUN_MIGRATIONS_ON_BOOT=true`); otherwise:
 make migrate            # npm run migration:run
 ```
 
-### Tests
+### Tests — why they run against real infrastructure
 
-Integration tests run against **real** Postgres + Redis (via Testcontainers) and
-mock only the Mistral HTTP boundary. *(Suite lands with the testing phase.)*
+During development the idempotency reclaim and the DLQ replay both passed every
+unit check, and 12 concurrent identical submissions still produced exactly one
+ticket. But the *responses* were wrong: 11 of 12 reported `accepted` instead of
+`replayed`. The cause was a TypeORM footgun — its raw `query()` returns a flat
+rows array for `INSERT … RETURNING` but a `[rows, affectedCount]` **2-tuple** for
+`UPDATE … RETURNING`, so a `.length > 0` check on the reclaim was *always* true and
+handed `NEW` to every concurrent caller. The data invariant held only because the
+`FOR UPDATE` lock and the outbox `dedup_key` independently absorbed the wrong
+semantics — defense in depth degraded a logic bug into a latent
+correctness-of-semantics issue instead of a data-corruption one.
+
+A green unit suite would never have caught this. **Only running the real thing,
+concurrently, against a real database did.** That is the entire reason this
+project's tests are integration tests over real infra, not mock-heavy unit tests:
+
+- **Postgres and Redis are real** (via Testcontainers) — the concurrency,
+  `SKIP LOCKED`, and `RETURNING` semantics are exactly what production runs.
+- **Only the Mistral HTTP boundary is mocked** — and even then by pointing the real
+  SDK at a local mock server (`MISTRAL_SERVER_URL`), so the client, validation,
+  retry, and breaker all execute for real. Nothing internal is stubbed.
+
+The suite proves the hard requirements actually hold: one ticket + one side effect
+per key, no double-processing under concurrency, graceful degradation + breaker
+opening when Mistral fails, at-least-once outbox delivery, and DLQ replay that
+doesn't duplicate.
 
 ```bash
 make test

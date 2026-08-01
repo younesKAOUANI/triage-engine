@@ -9,22 +9,59 @@ import {
   RedisContainer,
   StartedRedisContainer,
 } from '@testcontainers/redis';
-import { Queue } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { Logger } from 'nestjs-pino';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../../src/app.module';
+import { AiEnricher } from '../../src/enrichment/ai.enricher';
+import {
+  ENRICHER,
+  Enricher,
+  EnrichmentOutcome,
+} from '../../src/pipeline/enricher.port';
 import { PIPELINE_QUEUE } from '../../src/pipeline/pipeline.constants';
 import { TicketProcessor } from '../../src/pipeline/ticket.processor';
+import { TicketEntity } from '../../src/tickets/entities/ticket.entity';
 import { MockMistral, startMockMistral } from './mock-mistral';
 import { MockWebhook, startMockWebhook } from './mock-webhook';
+
+/**
+ * Wraps the real AiEnricher so a test can inject a fault at the pipeline's
+ * enrichment step — the only seam where an arbitrary error can reach the worker's
+ * failure handling. With nothing armed it delegates untouched, so every other
+ * test still exercises the genuine AI path end to end.
+ */
+class FaultInjectingEnricher implements Enricher {
+  private fault: Error | null = null;
+
+  constructor(private readonly inner: Enricher) {}
+
+  arm(error: Error | null): void {
+    this.fault = error;
+  }
+
+  async enrich(ticket: TicketEntity): Promise<EnrichmentOutcome> {
+    if (this.fault) {
+      throw this.fault;
+    }
+    return this.inner.enrich(ticket);
+  }
+}
 
 export interface Harness {
   app: INestApplication;
   http: ReturnType<INestApplication['getHttpServer']>;
   dataSource: DataSource;
   queue: Queue;
+  /** The live pipeline worker, for tests that need to pause/resume processing. */
+  worker: Worker;
   mistral: MockMistral;
   webhook: MockWebhook;
+  /** Fault injection for failure-path tests. Cleared by reset(). */
+  faults: {
+    /** Make the next enrichment(s) throw `error`; pass null to disarm. */
+    enricherThrows(error: Error | null): void;
+  };
   /** Truncate all tables, drain the queue, and reset the mocks (per-test isolation). */
   reset(): Promise<void>;
   stop(): Promise<void>;
@@ -80,7 +117,15 @@ export async function startHarness(): Promise<Harness> {
 
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
-  }).compile();
+  })
+    // Keep the real enricher (and therefore the real Mistral client, breaker and
+    // fallback) behind a thin wrapper that tests can arm with a fault.
+    .overrideProvider(ENRICHER)
+    .useFactory({
+      factory: (real: AiEnricher) => new FaultInjectingEnricher(real),
+      inject: [AiEnricher],
+    })
+    .compile();
 
   const app = moduleRef.createNestApplication({ bufferLogs: true });
   app.useLogger(app.get(Logger));
@@ -96,8 +141,11 @@ export async function startHarness(): Promise<Harness> {
   const dataSource = app.get(DataSource);
   const queue = app.get<Queue>(getQueueToken(PIPELINE_QUEUE));
   const processor = app.get(TicketProcessor);
+  const enricher = app.get<FaultInjectingEnricher>(ENRICHER);
 
   const reset = async (): Promise<void> => {
+    // Disarm faults before draining, so a job picked up mid-reset can't fail.
+    enricher.arm(null);
     // Drain the worker first: pause() waits for any active job to finish its
     // transaction, so TRUNCATE can't deadlock against a job mid-write. Then clear
     // queued/delayed jobs and the tables, and resume.
@@ -125,8 +173,12 @@ export async function startHarness(): Promise<Harness> {
     http: app.getHttpServer(),
     dataSource,
     queue,
+    worker: processor.worker,
     mistral,
     webhook,
+    faults: {
+      enricherThrows: (error: Error | null) => enricher.arm(error),
+    },
     reset,
     stop,
   };

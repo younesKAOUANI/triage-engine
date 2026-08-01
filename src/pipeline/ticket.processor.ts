@@ -1,6 +1,6 @@
 import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
 import { DataSource } from 'typeorm';
 import { backoffWithJitter } from '../common/backoff/backoff';
 import { runWithCorrelation } from '../common/correlation/correlation';
@@ -22,6 +22,13 @@ import {
   SIDE_EFFECT_UPGRADED,
 } from './pipeline.constants';
 import { PipelineProducer } from './pipeline.producer';
+
+/**
+ * Upper bound on the `job.isFailed()` terminality probe. Redis may be the thing
+ * that is broken, and a disconnected ioredis queues commands instead of failing,
+ * so an unbounded probe could hang the failure handler indefinitely.
+ */
+const TERMINAL_PROBE_TIMEOUT_MS = 2000;
 
 /**
  * The pipeline worker. For one ticket it: loads it, enriches it (via the
@@ -173,21 +180,153 @@ export class TicketProcessor extends WorkerHost {
   }
 
   /**
-   * Fires on every failed attempt. We only dead-letter once retries are truly
-   * exhausted; earlier failures just count a retry. (BullMQ has already scheduled
-   * the next attempt by the time this runs.)
+   * Fires on every failed attempt. We dead-letter only when the failure is
+   * TERMINAL — i.e. the job will never run again — and otherwise just count a
+   * retry. (BullMQ has already scheduled the next attempt by the time this runs.)
+   *
+   * NOTHING may escape this method: @nestjs/bullmq subscribes with a bare
+   * `worker.on(...)`, so a rejected promise here is an *unhandled* rejection —
+   * it would lose the dead letter and can tear the worker down.
    */
   @OnWorkerEvent('failed')
   async onFailed(job: Job<PipelineJobData>, error: Error): Promise<void> {
-    const maxAttempts = job.opts.attempts ?? 1;
-    if (job.attemptsMade >= maxAttempts) {
-      await this.dlq.recordDeadLetter(job, error);
-    } else {
-      this.metrics.eventsFailed.inc({ disposition: 'retry' });
-      this.logger.warn(
-        { jobId: job.id, attempt: job.attemptsMade, err: error.message },
-        'pipeline attempt failed; will retry',
+    try {
+      if (!(await this.classifyFailure(job, error))) {
+        this.metrics.eventsFailed.inc({ disposition: 'retry' });
+        this.logger.warn(
+          { jobId: job.id, attempt: job.attemptsMade, err: error?.message },
+          'pipeline attempt failed; will retry',
+        );
+        return;
+      }
+
+      // Classification and persistence are caught SEPARATELY and deliberately:
+      // only a failure here means the durable record is actually missing, so
+      // only here may we raise the alarm that says a job was lost.
+      try {
+        await this.dlq.recordDeadLetter(job, error);
+      } catch (persistError) {
+        // Postgres unreachable. This log line is now the last remaining trace of
+        // the job, so emit the whole payload to make it reconstructable.
+        this.metrics.eventsFailed.inc({
+          disposition: 'dead_letter_write_failed',
+        });
+        this.logger.error(
+          {
+            jobId: job.id,
+            idempotencyKey: job.data?.idempotencyKey,
+            ticketId: job.data?.ticketId,
+            payload: job.data,
+            originalError: error?.message,
+            err: persistError,
+          },
+          'could not persist dead letter; job is unrecoverable from the queue — replay it from this log line',
+        );
+      }
+    } catch (unexpected) {
+      // Absolute backstop. @nestjs/bullmq subscribes with a bare `worker.on()`,
+      // so a rejection escaping this method is an unhandled rejection.
+      this.logger.error(
+        { jobId: job?.id, err: unexpected },
+        'ticket failure handler threw unexpectedly',
       );
     }
+  }
+
+  /**
+   * Decide terminality, and never propagate a failure of the *decision* itself.
+   *
+   * If we cannot tell (the `isFailed()` probe needs Redis, which may be exactly
+   * what is broken), we fail SAFE by assuming terminal. The asymmetry is
+   * deliberate: a spurious dead letter is harmless and self-correcting — an
+   * operator replays it, and the replay re-enters through the original
+   * idempotency key, so it can duplicate neither the ticket nor the side effect.
+   * A *missed* dead letter is exactly the silent loss this engine exists to
+   * prevent.
+   */
+  private async classifyFailure(
+    job: Job<PipelineJobData>,
+    error: Error,
+  ): Promise<boolean> {
+    try {
+      return await this.isTerminalFailure(job, error);
+    } catch (classifyError) {
+      this.logger.warn(
+        { jobId: job.id, err: classifyError },
+        'could not determine whether failure was terminal; assuming terminal so the job is recorded rather than lost',
+      );
+      return true;
+    }
+  }
+
+  /**
+   * Is this failure the job's last? `attemptsMade >= opts.attempts` alone is NOT
+   * a sufficient test, because BullMQ has terminal paths that never increment
+   * `attemptsMade`:
+   *
+   *  - **Stalled jobs.** When a worker dies or loses its lock, the recovery
+   *    script bumps the *stall* counter (`stc`), not the attempt counter (`atm`),
+   *    and once it passes `maxStalledCount` it writes a deferred-failure marker
+   *    (`defa`) onto the job hash. On the next pickup the worker turns that
+   *    marker into an `UnrecoverableError` *before* the processor ever runs, and
+   *    `Job.shouldRetryJob` declines to retry it — the job is in the failed set
+   *    for good, typically with `attemptsMade` of 1 against `attempts` of 5.
+   *  - **`maxStartedAttempts`**, and an `UnrecoverableError` thrown by the
+   *    processor, fail the same way.
+   *  - **`job.discard()`** and a backoff strategy returning -1 also stop retries.
+   *
+   * Read naively, every one of those looks like "an attempt failed, more remain",
+   * so the job would be dropped without a dead_letters row — exactly the silent
+   * loss this engine exists to prevent (ADR-0007). The ticket would also stay
+   * PENDING, which the DEGRADED reconciliation sweep does not scan for.
+   */
+  private async isTerminalFailure(
+    job: Job<PipelineJobData>,
+    error: Error,
+  ): Promise<boolean> {
+    // Name check as well as instanceof: the error may have been constructed in a
+    // different module realm (duplicate bullmq copy), which defeats instanceof.
+    if (
+      error instanceof UnrecoverableError ||
+      error.name === 'UnrecoverableError'
+    ) {
+      return true;
+    }
+    // Normal exhaustion. `moveToFailed` increments attemptsMade *before* emitting
+    // 'failed', so on the final attempt this is already == opts.attempts.
+    if (job.attemptsMade >= (job.opts.attempts ?? 1)) {
+      return true;
+    }
+    // Backstop for every other terminal path (discard(), backoff -1, whatever
+    // BullMQ adds next): if the job is sitting in the failed set, it is done.
+    //
+    // Two constraints this depends on:
+    //  - It reads the failed set, so `removeOnFail` must RETAIN the job long
+    //    enough to be observed. `true`, `{ age: 0 }` and `{ count: 0 }` all
+    //    delete it first and silently defeat the backstop.
+    //  - It needs Redis, which may be the very thing that is broken, and a
+    //    disconnected ioredis queues commands rather than failing fast. Bound it
+    //    so the handler can never hang; the caller treats a rejection as
+    //    "assume terminal".
+    return this.withTimeout(
+      job.isFailed(),
+      TERMINAL_PROBE_TIMEOUT_MS,
+      'isFailed() probe timed out',
+    );
+  }
+
+  private withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    message: string,
+  ): Promise<T> {
+    let timer: NodeJS.Timeout;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+      timer.unref?.();
+    });
+    return Promise.race([promise, timeout]).finally(() =>
+      clearTimeout(timer),
+    ) as Promise<T>;
   }
 }

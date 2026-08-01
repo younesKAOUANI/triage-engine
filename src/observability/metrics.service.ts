@@ -40,10 +40,16 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  /**
+   * `dead_letter_write_failed` is the one to alert on: the job went terminal but
+   * its durable record could not be persisted, so the only trace left is a log
+   * line. `dead_letter` means the failure was captured properly.
+   */
   readonly eventsFailed = new Counter({
     name: 'events_failed_total',
     help: 'Pipeline job failures, by terminal disposition.',
-    labelNames: ['disposition'] as const, // retry | dead_letter
+    // retry | dead_letter | dead_letter_write_failed
+    labelNames: ['disposition'] as const,
     registers: [this.registry],
   });
 

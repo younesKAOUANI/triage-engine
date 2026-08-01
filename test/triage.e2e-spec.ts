@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { UnrecoverableError } from 'bullmq';
 import request from 'supertest';
 import { PipelineProducer } from '../src/pipeline/pipeline.producer';
 import { ReconcileSweeper } from '../src/pipeline/reconcile.sweeper';
@@ -286,6 +287,71 @@ describe('Triage engine (integration)', () => {
 
       // Double replay is rejected.
       await request(h.http).post(`/dlq/${dlId}/replay`).expect(409);
+    });
+
+    // ── Terminal failures that never exhaust the attempt budget ───────────────
+    //
+    // BullMQ can retire a job permanently while `attemptsMade` is still well
+    // below `opts.attempts`. Inferring "terminal" from the attempt count alone
+    // misreads these as "will retry", so no dead_letters row is written and the
+    // ticket is silently dropped — it stays PENDING, and the reconciliation
+    // sweep only re-drives DEGRADED tickets, so nothing rescues it.
+    const deadLetterFor = (key: string) =>
+      waitFor(
+        () =>
+          h.dataSource
+            .query(
+              `SELECT attempts_made, error_message, status FROM dead_letters WHERE idempotency_key = $1`,
+              [key],
+            )
+            .then((r) => r[0]),
+        (row) => Boolean(row),
+        { timeoutMs: 15000 },
+      );
+
+    it('dead-letters an UnrecoverableError even though attempts remain', async () => {
+      // An UnrecoverableError makes Job.shouldRetryJob decline the retry, so the
+      // job goes straight to the failed set on attempt 1 of 3.
+      h.faults.enricherThrows(new UnrecoverableError('poison ticket'));
+
+      const res = await post(sampleBody, 'k-unrecoverable').expect(202);
+      const row = await deadLetterFor('k-unrecoverable');
+
+      expect(row.error_message).toContain('poison ticket');
+      expect(row.status).toBe('PENDING'); // captured and replayable
+      // The point of the test: it was dead-lettered *early*, not by exhaustion.
+      expect(row.attempts_made).toBeLessThan(3); // PIPELINE_MAX_ATTEMPTS
+
+      // And the ticket really is stranded — nothing else would have caught it.
+      const ticket = await getTicket(res.body.ticketId).then((r) => r.body);
+      expect(ticket.enrichment.status).toBe('PENDING');
+    });
+
+    it('dead-letters a job BullMQ deferred to failure after it stalled', async () => {
+      const key = 'k-stalled';
+      // Hold the worker so we can mark the job before it is ever picked up.
+      await h.worker.pause();
+      try {
+        await post(sampleBody, key).expect(202);
+
+        // Reproduce what a real stall leaves behind. When a worker dies or loses
+        // its lock, moveStalledJobsToWait increments the *stall* counter (`stc`,
+        // not `atm`) and — once past maxStalledCount — writes this deferred
+        // failure marker onto the job hash. We set the marker directly rather
+        // than killing a worker mid-job, but everything downstream is real: on
+        // pickup the worker converts `defa` into an UnrecoverableError before the
+        // processor runs, and retires the job.
+        const client = await h.queue.client;
+        await client.hset(h.queue.toKey(key), {
+          defa: 'job stalled more than allowable limit',
+        });
+      } finally {
+        h.worker.resume();
+      }
+
+      const row = await deadLetterFor(key);
+      expect(row.error_message).toContain('stalled');
+      expect(row.attempts_made).toBeLessThan(3); // never got near the budget
     });
   });
 

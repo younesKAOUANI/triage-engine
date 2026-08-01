@@ -18,7 +18,7 @@ export enum DeadLetterStatus {
  * operational surface: it's queryable (GET /dlq), carries full error context for
  * triage, and survives Redis being flushed.
  *
- * `payload` is the original job data verbatim — crucially including the
+ * `payload` is the original job data verbatim, including the
  * idempotency key — so a replay re-enters the pipeline through the SAME key and
  * cannot create a duplicate ticket (see DlqService.replay and ADR-0001/0007).
  */

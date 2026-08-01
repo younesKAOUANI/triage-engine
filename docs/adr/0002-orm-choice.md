@@ -13,16 +13,20 @@ particular system is dominated by.
 
 Use **TypeORM**.
 
-The deciding factor is that the heart of this project is hand-tuned transactional
-SQL, and TypeORM exposes it as a first-class citizen:
+The deciding factor is that this system is dominated by hand-written
+transactional SQL, and TypeORM lets that sit alongside the entity layer instead
+of fighting it:
 
-- `SELECT … FOR UPDATE SKIP LOCKED` is available directly on the QueryBuilder.
-  It is the backbone of the outbox relay (claim a batch without two relays
-  fighting) and the stale-lease recovery. In Prisma this requires dropping to
-  `$queryRaw`, i.e. leaving the abstraction precisely where the interesting logic
-  is — which would read as a workaround rather than a deliberate design.
-- The `QueryRunner` gives explicit transaction control, so "write the state
-  change and the outbox row in the *same* transaction" is obvious and reviewable.
+- `QueryRunner` gives explicit transaction control, and its `EntityManager` runs
+  both entity operations and raw SQL on the *same* connection. That is what makes
+  "update the ticket and write the outbox row in one transaction" a plain piece
+  of code rather than an arrangement I have to reason about.
+- The relay's claim query (`SELECT … FOR UPDATE SKIP LOCKED`) is written as raw
+  SQL through that same manager. I did not try to express it through the
+  QueryBuilder: `setLock('pessimistic_write')` covers `FOR UPDATE`, but the
+  `SKIP LOCKED` variant the relay depends on is clearer written out, and the
+  point is that doing so costs nothing here — it is still the same transaction,
+  the same manager, no second connection path.
 - `@nestjs/typeorm` integrates natively; entities co-locate with their modules.
 
 **Honest trade-off**: if this were a typical CRUD product, I would most likely
@@ -43,6 +47,6 @@ beats picking the default.
     and you leak pooled connections until the app wedges. Mitigated by funnelling
     **every** manual transaction through one `runInTransaction` helper
     (`src/common/database/transaction.helper.ts`); no call site manages that
-    lifecycle by hand. Reviewers familiar with TypeORM will check for exactly this.
+    lifecycle by hand.
   - TypeORM's raw `query()` has inconsistent return shapes for `RETURNING` DML
     (see ADR-0001). We avoid the trap by using typed QueryBuilder results.

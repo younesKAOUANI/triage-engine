@@ -8,7 +8,7 @@ import { LlmEnrichment } from './llm-response.schema';
 
 /**
  * Rule-based classifier used when the AI is unavailable (ADR-0006). It is
- * deterministic, dependency-free, and instant, and crucially it returns the
+ * deterministic, dependency-free, and instant, and it returns the
  * SAME shape as the AI path (LlmEnrichment) so a degraded result is a true
  * drop-in. It is intentionally simple keyword matching — its job is to keep
  * tickets usable during an outage, not to rival the model. The low confidence it

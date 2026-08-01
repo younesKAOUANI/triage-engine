@@ -40,7 +40,7 @@ SELECT ... FROM outbox_messages
 
 ## Consequences
 
-- **Positive**: simple, durable, horizontally scalable, and robust to listener
+- **Positive**: simple, durable, horizontally scalable, and unaffected by listener
   downtime. No event is missed because nothing was listening. Verified live: side
   effects dispatched exactly once per `dedup_key`.
 - **Negative / accepted**:

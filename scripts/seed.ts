@@ -1,6 +1,6 @@
 /**
  * Seeds a few sample tickets by POSTing to a running instance. Run with
- * `make seed` (after `make up`). Demonstrates both modes: events with an explicit
+ * `make seed` (after `make up`). Posts a few events both ways: with an explicit
  * idempotency key and events without one (key derived from content).
  */
 const BASE_URL = `http://localhost:${process.env.PORT ?? 3000}`;

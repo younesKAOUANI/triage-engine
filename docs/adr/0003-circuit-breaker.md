@@ -27,8 +27,9 @@ Use **opossum**, the de-facto Node circuit-breaker library.
 - Its `open` / `halfOpen` / `close` events drive the `circuit_breaker_state` gauge
   (1 / 0.5 / 0), so the breaker is observable, not a black box.
 
-A hand-rolled breaker would be reinventing a well-tested wheel for no benefit on a
-project whose value is elsewhere. The senior move here is *not* writing more code.
+Writing my own would mean reimplementing the half-open probe accounting and the
+rolling error window, both easy to get subtly wrong and tedious to test properly.
+opossum already does it, and the interesting work on this project is elsewhere.
 
 ## Consequences
 

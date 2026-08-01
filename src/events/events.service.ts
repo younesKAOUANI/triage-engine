@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { getCorrelationId } from '../common/correlation/correlation';
 import { hashPayload } from '../common/hash/canonical-hash';
@@ -10,6 +15,32 @@ import { PipelineProducer } from '../pipeline/pipeline.producer';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
 import { EnrichmentStatus } from '../tickets/ticket.enums';
 import { CreateEventDto } from './dto/create-event.dto';
+
+/**
+ * The idempotency key becomes a BullMQ job id, and BullMQ constrains those:
+ * a custom id may not look like an integer, and may contain ':' only when it
+ * splits into exactly three parts. Since the pipeline derives ids by appending
+ * suffixes (`<key>:replay:<id>`, `<key>:upgrade:<n>`, `<key>:reconcile:0`), a key
+ * containing ':' breaks every one of those schemes.
+ *
+ * Rejecting such a key at the door — with a 400, before anything is written — is
+ * the only place this can be handled cleanly. Downstream it would surface as a
+ * committed ticket whose job could never be enqueued.
+ */
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,254}$/;
+
+function assertUsableAsJobId(key: string): void {
+  if (!IDEMPOTENCY_KEY_PATTERN.test(key)) {
+    throw new BadRequestException(
+      'idempotencyKey must be 1-255 characters of letters, digits, dot, underscore, tilde or hyphen (no colons)',
+    );
+  }
+  if (/^\d+$/.test(key)) {
+    throw new BadRequestException(
+      'idempotencyKey must not consist only of digits',
+    );
+  }
+}
 
 export interface IngestResult {
   status: 'accepted' | 'processing' | 'replayed';
@@ -49,6 +80,9 @@ export class EventsService {
       metadata: dto.metadata ?? null,
     });
     const key = headerKey ?? dto.idempotencyKey ?? requestHash;
+    // Validate here rather than on the DTO: the key can also arrive as a header,
+    // which no DTO pipe ever sees.
+    assertUsableAsJobId(key);
     const correlationId = getCorrelationId();
 
     const claim = await this.idempotency.claim(key, requestHash);
@@ -93,21 +127,25 @@ export class EventsService {
   ): Promise<IngestResult> {
     let ticketId: string;
     let eventId: string;
+    let jobId: string;
     try {
       ({ ticketId, eventId } = await this.createTicketIfAbsent(key, dto));
+      // The enqueue is inside the try on purpose. It runs after the ticket has
+      // already been committed, so if it throws, the key must not be left
+      // PENDING — it would hold its lease for the full reclaim window while no
+      // job exists, and nothing would re-drive it.
+      jobId = await this.pipeline.enqueue({
+        idempotencyKey: key,
+        ticketId,
+        eventId,
+        correlationId,
+      });
     } catch (error) {
       // Ingestion failed before completion: mark FAILED so a later request (or a
       // lease-reclaim) is allowed to re-drive this key cleanly.
       await this.idempotency.markFailed(key);
       throw error;
     }
-
-    const jobId = await this.pipeline.enqueue({
-      idempotencyKey: key,
-      ticketId,
-      eventId,
-      correlationId,
-    });
 
     const responseBody = {
       status: 'accepted' as const,

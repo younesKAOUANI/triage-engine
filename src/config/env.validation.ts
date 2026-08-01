@@ -1,6 +1,27 @@
 import { z } from 'zod';
 
 /**
+ * Parse a boolean from an env var.
+ *
+ * NOT `z.coerce.boolean()`: that is `Boolean(string)`, so every non-empty value
+ * is true — including the string "false", which silently turns a documented
+ * off-switch into an always-on one.
+ */
+const envBool = (defaultValue: boolean) =>
+  z
+    .enum(['true', 'false', '1', '0', ''])
+    .optional()
+    .transform((v) =>
+      v === undefined || v === '' ? defaultValue : v === 'true' || v === '1',
+    );
+
+/** A URL that may also be supplied as an empty string, which means "unset". */
+const optionalUrl = z.preprocess(
+  (v) => (v === '' ? undefined : v),
+  z.string().url().optional(),
+);
+
+/**
  * Single source of truth for configuration. The app refuses to boot if the
  * environment is invalid (fail fast, loudly) rather than discovering a missing
  * value deep in a request handler. zod handles both validation and coercion of
@@ -21,7 +42,7 @@ export const envSchema = z.object({
   POSTGRES_USER: z.string().min(1).default('triage'),
   POSTGRES_PASSWORD: z.string().min(1).default('triage'),
   POSTGRES_DB: z.string().min(1).default('triage'),
-  DB_RUN_MIGRATIONS_ON_BOOT: z.coerce.boolean().default(false),
+  DB_RUN_MIGRATIONS_ON_BOOT: envBool(false),
 
   // Redis / BullMQ
   REDIS_HOST: z.string().min(1).default('localhost'),
@@ -53,7 +74,7 @@ export const envSchema = z.object({
   MISTRAL_MAX_RETRIES: z.coerce.number().int().min(0).default(2),
   // Override the SDK base URL — lets tests point the real client at a mock HTTP
   // server (so only the HTTP boundary is faked, nothing internal).
-  MISTRAL_SERVER_URL: z.string().url().optional(),
+  MISTRAL_SERVER_URL: optionalUrl,
 
   // Graceful-degradation re-enrichment: a DEGRADED ticket is re-queued on a
   // delay to attempt an AI upgrade later (decoupled from breaker state to avoid a

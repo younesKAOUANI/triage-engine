@@ -69,6 +69,23 @@ describe('Triage engine (integration)', () => {
       await post(sampleBody, 'k-conflict').expect(202);
       await post({ ...sampleBody, body: 'totally different content' }, 'k-conflict').expect(409);
     });
+
+    it('rejects keys that cannot become a job id, before writing anything', async () => {
+      // A colon breaks every derived job id (<key>:replay:<id> and friends), and
+      // BullMQ refuses an all-digit custom id. Both must fail at the door: the
+      // alternative is a committed ticket whose job can never be enqueued.
+      await post(sampleBody, 'order:123').expect(400);
+      await post(sampleBody, '12345').expect(400);
+      expect(await ticketCount()).toBe(0);
+
+      // The header path is checked too — no DTO pipe ever sees it.
+      await request(h.http)
+        .post('/events')
+        .set('Idempotency-Key', 'urn:uuid:abc')
+        .send(sampleBody)
+        .expect(400);
+      expect(await ticketCount()).toBe(0);
+    });
   });
 
   // ── Concurrency (the race) ───────────────────────────────────────────────────

@@ -1,7 +1,10 @@
 import { Controller, Get, Header, Res } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import type { Response } from 'express';
 import { MetricsService } from './metrics.service';
 
+// A throttled scrape looks like an outage to Prometheus.
+@SkipThrottle()
 @Controller()
 export class MetricsController {
   constructor(private readonly metrics: MetricsService) {}

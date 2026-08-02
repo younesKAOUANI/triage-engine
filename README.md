@@ -5,6 +5,10 @@
 An event-processing service that ingests support tickets, classifies them with an
 LLM, and notifies a downstream system. NestJS, Postgres, Redis/BullMQ, Mistral.
 
+Running at **[triage-engine.youneskaouani.dev](https://triage-engine.youneskaouani.dev)**
+— `/ready`, `/metrics` and `/dlq` are open, and `POST /events` accepts work
+(rate limited).
+
 The classification itself is a few hundred lines. Most of this repo is the part
 that keeps working when things go wrong: duplicate deliveries, worker crashes
 mid-job, a notification target returning 500s, and a model that is sometimes
@@ -178,6 +182,23 @@ Configuration lives in `.env`; [.env.example](.env.example) documents every valu
 and is a working default. The app boots without `MISTRAL_API_KEY` and degrades to
 the rule-based classifier rather than failing. Schema changes go through explicit
 migrations, never `synchronize`.
+
+### Deploying it
+
+A single host runs the whole stack behind Caddy, which handles TLS
+automatically. Postgres and Redis are containers on an internal network with no
+route off the box, and nothing but Caddy publishes a port. Pushing to `main`
+runs the tests, builds an image, pushes it to GHCR and deploys it by commit sha,
+then polls `/ready` and fails the run if the new revision never serves traffic.
+
+```bash
+make prod-up     # start the stack (needs .env from .env.production.example)
+make prod-logs
+make backup      # pg_dump to ./backups
+```
+
+Full runbook, secrets, rollback and the metrics worth alerting on:
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 

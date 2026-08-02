@@ -1,0 +1,35 @@
+# Caddy obtains and renews the certificate for this name automatically, so long
+# as the A/AAAA record points here and ports 80 and 443 are reachable. The ACME
+# HTTP-01 challenge needs port 80 open; do not firewall it off after issuance or
+# renewal will silently start failing ~60 days later.
+{$DOMAIN} {
+	encode gzip zstd
+
+	# The app reads the client address from X-Forwarded-For for per-IP rate
+	# limiting, which only works because TRUST_PROXY=true is set alongside this.
+	# Caddy overwrites the header rather than appending to a client-supplied one,
+	# so a caller cannot forge their own address.
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+
+		# Readiness, not liveness: this gate should fail while Postgres or Redis
+		# are unreachable, so Caddy stops sending traffic to an instance that
+		# cannot serve it.
+		health_uri /ready
+		health_interval 10s
+		health_timeout 3s
+	}
+
+	log {
+		output stdout
+		format json
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}

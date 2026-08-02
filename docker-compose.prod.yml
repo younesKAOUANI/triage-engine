@@ -1,0 +1,106 @@
+# Production stack for a single host: Caddy terminates TLS, the app and its
+# datastores sit behind it with no published ports.
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#
+# Differs from docker-compose.yml (the local dev stack) in ways that matter:
+#   - the app image is pulled from the registry, not built on the box
+#   - Postgres and Redis publish nothing to the host
+#   - Caddy owns 80/443 and holds the certificates in a named volume
+#   - logs are size-capped so a busy week cannot fill the disk
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account keys. Losing this volume means re-issuing
+      # on next boot, which Let's Encrypt rate limits — keep it.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    networks: [edge]
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE, e.g. ghcr.io/owner/triage-engine:sha}
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      # Reach the sibling containers over the data network, on their
+      # in-container ports.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      # Caddy is the only thing that talks to the app, so honour its forwarded
+      # client address. Meaningless (and unsafe) without a proxy in front.
+      TRUST_PROXY: "true"
+      # The bundled sink stands in for a real consumer. Point WEBHOOK_TARGET_URL
+      # at the actual downstream when there is one.
+      WEBHOOK_TARGET_URL: ${WEBHOOK_TARGET_URL:-http://app:3000/_sink/webhook}
+    init: true # reap zombies and forward SIGTERM so shutdown hooks run
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    # On both networks on purpose: `edge` carries Caddy's traffic in AND the
+    # app's outbound calls to the Mistral API. `data` is egress-less and only
+    # exists so Postgres and Redis have no route off the box.
+    networks: [edge, data]
+    logging: *logging
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [data]
+    logging: *logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # appendonly so queue state survives a restart. BullMQ keeps jobs in Redis;
+    # losing it mid-flight strands tickets, which is what the reconciliation
+    # sweep exists to recover from — but not needing it is better.
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [data]
+    logging: *logging
+
+networks:
+  edge:
+  data:
+    internal: true # Postgres and Redis get no route off the host
+
+volumes:
+  caddy_data:
+  caddy_config:
+  pgdata:
+  redisdata:

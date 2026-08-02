@@ -7,7 +7,6 @@ RUN npm ci
 
 COPY tsconfig*.json nest-cli.json ./
 COPY src ./src
-COPY scripts ./scripts
 RUN npm run build
 
 # Drop devDependencies for a lean runtime image.
@@ -26,6 +25,14 @@ COPY --chown=node:node package.json ./
 USER node
 EXPOSE 3000
 
-# The container starts the HTTP app; migrations run on boot when
-# DB_RUN_MIGRATIONS_ON_BOOT=true (see src/main.ts).
+# Liveness only. /health is deliberately dependency-free (see HealthController):
+# a Postgres blip must not make the orchestrator kill an otherwise healthy
+# container. Readiness, which does check the datastores, is what the reverse
+# proxy and any rollout should gate on.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+# Migrations run on boot when DB_RUN_MIGRATIONS_ON_BOOT=true, which is applied in
+# src/config/database.module.ts. With more than one replica, leave it off and run
+# `migrate` as a separate step so instances don't race each other at startup.
 CMD ["node", "dist/main.js"]

@@ -30,6 +30,16 @@ async function bootstrap(): Promise<void> {
     correlationStorage.run({ correlationId }, () => next());
   });
 
+  // Behind a reverse proxy, every request otherwise appears to originate from
+  // the proxy, which collapses per-IP rate limiting into a single shared bucket
+  // and puts the proxy's address in the logs. Only enable it when a proxy is
+  // genuinely in front: trusting X-Forwarded-For when it is not lets a caller
+  // spoof their own address and bypass the limit.
+  const envVars = app.get<EnvVars>(APP_ENV);
+  if (envVars.TRUST_PROXY) {
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  }
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
@@ -43,8 +53,7 @@ async function bootstrap(): Promise<void> {
   // SIGTERM so in-flight work drains instead of being severed.
   app.enableShutdownHooks();
 
-  const env = app.get<EnvVars>(APP_ENV);
-  await app.listen(env.PORT, '0.0.0.0');
+  await app.listen(envVars.PORT, '0.0.0.0');
 }
 
 void bootstrap();

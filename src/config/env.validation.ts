@@ -88,6 +88,24 @@ export const envSchema = z.object({
   RECONCILE_DEGRADED_AFTER_MS: z.coerce.number().int().min(0).default(300000),
   RECONCILE_BATCH_SIZE: z.coerce.number().int().min(1).default(50),
 
+  // Rate limiting. The public demo accepts writes from anyone, so ingestion is
+  // capped per client IP. Requires TRUST_PROXY when running behind a reverse
+  // proxy, otherwise every request appears to come from the proxy and a single
+  // caller exhausts the bucket for everybody.
+  TRUST_PROXY: envBool(false),
+  RATE_LIMIT_TTL_MS: z.coerce.number().int().min(1000).default(60000),
+  /** Ceiling for ordinary reads. */
+  RATE_LIMIT_GLOBAL: z.coerce.number().int().min(1).default(120),
+  /** Tighter ceiling for POST /events and DLQ replay. */
+  RATE_LIMIT_WRITES: z.coerce.number().int().min(1).default(20),
+
+  // Retention. The demo runs unattended on a public URL, so the tables that grow
+  // without bound are pruned on a schedule (ADR-0001 flags idempotency_keys in
+  // particular). Set RETENTION_ENABLED=false to keep everything.
+  RETENTION_ENABLED: envBool(false),
+  RETENTION_SWEEP_INTERVAL_MS: z.coerce.number().int().min(60000).default(3600000),
+  RETENTION_MAX_AGE_MS: z.coerce.number().int().min(60000).default(604800000),
+
   // Circuit breaker (opossum)
   CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENT: z.coerce
     .number()

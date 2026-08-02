@@ -7,6 +7,7 @@ import {
   Logger,
   Post,
 } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 
 /**
  * A stand-in for an external notification consumer, so the whole stack runs
@@ -17,6 +18,10 @@ import {
  * Purely a local simulation; a real deployment points WEBHOOK_TARGET_URL at the
  * actual consumer and this controller is irrelevant.
  */
+// The relay dispatches to this controller in the bundled demo setup, so it
+// must never be rate limited: throttling it would throttle the engine's own
+// deliveries and manufacture outbox retries.
+@SkipThrottle()
 @Controller('_sink')
 export class SinkController {
   private readonly logger = new Logger('WebhookSink');

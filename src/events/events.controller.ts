@@ -1,4 +1,6 @@
 import { Body, Controller, Headers, HttpCode, Post } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { WRITE_LIMIT } from '../common/rate-limit/rate-limit.module';
 import { CreateEventDto } from './dto/create-event.dto';
 import { EventsService } from './events.service';
 
@@ -14,6 +16,7 @@ export class EventsController {
    */
   @Post()
   @HttpCode(202)
+  @Throttle({ [WRITE_LIMIT]: {} })
   ingest(
     @Body() dto: CreateEventDto,
     @Headers('idempotency-key') idempotencyKey: string | undefined,

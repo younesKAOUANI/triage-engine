@@ -108,6 +108,16 @@ export async function startHarness(): Promise<Harness> {
     CIRCUIT_BREAKER_RESET_MS: '1000',
     ENRICHMENT_UPGRADE_BACKOFF_MS: '1000',
     ENRICHMENT_UPGRADE_MAX_ATTEMPTS: '5',
+    // A one-second window rather than the production minute: the suite posts in
+    // bursts, so a long window would accumulate across unrelated tests and
+    // start returning 429 halfway through the run. Short window plus a headroom
+    // limit keeps normal tests clear while still leaving the limit provable by
+    // a deliberate run of writes in the rate-limiting test.
+    RATE_LIMIT_TTL_MS: '1000',
+    RATE_LIMIT_GLOBAL: '500',
+    RATE_LIMIT_WRITES: '25',
+    // Retention is driven explicitly in tests, never on a timer.
+    RETENTION_ENABLED: 'false',
     // Sweep never auto-fires during a test (huge interval); tests call sweep()
     // directly. Age threshold 0 so any DEGRADED ticket is eligible immediately.
     RECONCILE_SWEEP_INTERVAL_MS: '600000',

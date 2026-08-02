@@ -1,4 +1,5 @@
 import { Controller, Get } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import {
   HealthCheck,
   HealthCheckService,
@@ -15,6 +16,8 @@ import { RedisHealthIndicator } from './redis.health';
  *    Checks Postgres and Redis. A failure here pulls the instance out of the load
  *    balancer without killing it, so it can recover.
  */
+// A throttled probe would be read as the instance being down.
+@SkipThrottle()
 @Controller()
 export class HealthController {
   constructor(

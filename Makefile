@@ -1,6 +1,6 @@
 # Thin wrappers over the common workflows. `make help` lists them.
 .DEFAULT_GOAL := help
-.PHONY: help up down logs build migrate seed test test-unit dev install env
+.PHONY: help up down logs build migrate seed test test-unit dev install env prod-up prod-down prod-logs prod-ps backup
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -41,3 +41,21 @@ test: ## Run the integration test suite (testcontainers: real postgres + redis)
 
 test-unit: ## Run unit tests
 	npm run test:unit
+
+# ── Production (single host; see docs/DEPLOYMENT.md) ─────────────────────────
+PROD := docker compose -f docker-compose.prod.yml
+
+prod-up: ## Start the production stack (needs .env from .env.production.example)
+	$(PROD) up -d
+
+prod-down: ## Stop the production stack (volumes are KEPT)
+	$(PROD) down
+
+prod-logs: ## Tail production app logs
+	$(PROD) logs -f app
+
+prod-ps: ## Show production container status
+	$(PROD) ps
+
+backup: ## Dump the production database to ./backups
+	./deploy/backup.sh

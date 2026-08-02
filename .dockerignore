@@ -5,3 +5,12 @@ coverage
 .env
 *.log
 npm-debug.log*
+test
+docs
+deploy
+.github
+*.md
+.env.example
+.env.production.example
+docker-compose*.yml
+jest.config.js

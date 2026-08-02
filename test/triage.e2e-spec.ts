@@ -372,6 +372,37 @@ describe('Triage engine (integration)', () => {
     });
   });
 
+  // ── Rate limiting (public deployment) ────────────────────────────────────────
+  describe('rate limiting', () => {
+    it('throttles a burst of writes but never the probes', async () => {
+      // RATE_LIMIT_WRITES is 25 per second here; overshoot it deliberately.
+      // Sequential, not concurrent: supertest opens a fresh connection per
+      // request, and a few dozen at once exhaust the ephemeral server and
+      // surface as ECONNRESET before the throttler is ever consulted.
+      const codes: number[] = [];
+      try {
+        for (let i = 0; i < 40; i++) {
+          const res = await post(sampleBody, `k-burst-${i}`);
+          codes.push(res.status);
+        }
+
+        expect(codes).toContain(202);
+        expect(codes).toContain(429); // the limit actually engages
+
+        // Health, readiness and metrics opt out. A throttled probe would be
+        // read as an outage, and throttling the bundled sink would throttle the
+        // relay's own deliveries.
+        for (const path of ['/health', '/ready', '/metrics']) {
+          await request(h.http).get(path).expect(200);
+        }
+      } finally {
+        // Let the window lapse even if an expectation failed, so this test
+        // cannot leak 429s into the next one.
+        await new Promise((r) => setTimeout(r, 1200));
+      }
+    }, 30000);
+  });
+
   // ── Reconciliation sweep (ADR-0009) ──────────────────────────────────────────
   describe('reconciliation', () => {
     it('re-drives a ticket whose upgrade job was lost', async () => {

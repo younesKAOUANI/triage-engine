@@ -113,6 +113,14 @@ export class MetricsService {
     registers: [this.registry],
   });
 
+  // ── Retention ──────────────────────────────────────────────────────────────
+  readonly retentionPruned = new Counter({
+    name: 'retention_rows_pruned_total',
+    help: 'Rows deleted by the retention sweep, by table.',
+    labelNames: ['table'] as const,
+    registers: [this.registry],
+  });
+
   readonly outboxDispatchLatency = new Histogram({
     name: 'outbox_dispatch_latency_seconds',
     help: 'Latency of a single outbox dispatch attempt.',

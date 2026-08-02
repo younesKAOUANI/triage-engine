@@ -10,6 +10,8 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
+import { WRITE_LIMIT } from '../../common/rate-limit/rate-limit.module';
 import { DlqService } from './dlq.service';
 import { DeadLetterEntity, DeadLetterStatus } from './entities/dead-letter.entity';
 
@@ -41,6 +43,7 @@ export class DlqController {
   /** POST /dlq/:id/replay — re-enqueue through the original idempotency key. */
   @Post(':id/replay')
   @HttpCode(202)
+  @Throttle({ [WRITE_LIMIT]: {} })
   async replay(@Param('id', ParseUUIDPipe) id: string) {
     return this.dlq.replay(id);
   }

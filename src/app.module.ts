@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { LoggerModule } from 'nestjs-pino';
 import { buildLoggerParams } from './common/logging/logging.config';
+import { RateLimitModule } from './common/rate-limit/rate-limit.module';
+import { RetentionModule } from './retention/retention.module';
 import { APP_ENV, AppConfigModule } from './config/app-config.module';
 import { DatabaseModule } from './config/database.module';
 import { EnvVars } from './config/env.validation';
@@ -25,6 +27,8 @@ import { TicketsModule } from './tickets/tickets.module';
     RedisModule,
     MetricsModule,
     HealthModule,
+    RateLimitModule,
+    RetentionModule,
 
     // Domain: ingestion -> idempotency -> pipeline -> outbox.
     IdempotencyModule,

@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  # A newer push supersedes an in-flight run on the same ref, except on main:
+  # those runs publish an image and deploy, so let them finish.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest # ships with Docker, which Testcontainers needs
@@ -26,7 +32,122 @@ jobs:
       - name: Build
         run: npm run build
 
-      # Integration tests spin real Postgres + Redis via Testcontainers and mock
-      # only the Mistral/webhook HTTP boundaries — the same suite that runs locally.
+      - name: Unit tests
+        run: npm run test:unit
+
+      # Pull ahead of time so a cold runner isn't fetching images inside the
+      # suite's beforeAll timeout.
+      - name: Pre-pull test images
+        run: |
+          docker pull postgres:16-alpine &
+          docker pull redis:7-alpine &
+          wait
+
+      # Real Postgres + Redis via Testcontainers; only the Mistral and webhook
+      # HTTP boundaries are mocked.
       - name: Integration tests
         run: npm test
+
+  publish:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Lowercase the owner: GHCR rejects uppercase in a repository path, and
+      # GitHub usernames may contain it.
+      - name: Compute image reference
+        id: meta
+        run: |
+          repo="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+          echo "image=$repo:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.repo }}:${{ github.sha }}
+            ${{ steps.meta.outputs.repo }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: publish
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Point this at a GitHub Environment to gate deploys behind a manual
+    # approval, or to scope the SSH secrets to production only.
+    environment:
+      name: production
+      url: https://triage-engine.youneskaouani.dev
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          # Fail the job on any failing command rather than on the last one only.
+          script_stops: true
+          script: |
+            set -euo pipefail
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            # Pull the compose file and Caddyfile for this commit. The stack
+            # definition is versioned with the code that runs under it.
+            git fetch --depth 1 origin main
+            git checkout -f FETCH_HEAD
+
+            # Only needed while the GHCR package is private. Publish the package
+            # and this becomes a no-op you can delete along with the secret.
+            if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
+                -u ${{ github.actor }} --password-stdin
+            fi
+
+            # Pin the exact image this pipeline built. Using :latest would make
+            # the deployed revision ambiguous and break rollback.
+            export APP_IMAGE="${{ needs.publish.outputs.image }}"
+            grep -q '^APP_IMAGE=' .env \
+              && sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$APP_IMAGE|" .env \
+              || echo "APP_IMAGE=$APP_IMAGE" >> .env
+
+            docker compose -f docker-compose.prod.yml pull app
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            docker image prune -f
+
+      - name: Verify the deployment is serving
+        run: |
+          set -euo pipefail
+          url="https://triage-engine.youneskaouani.dev/ready"
+          for i in $(seq 1 30); do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "ready after ${i} attempt(s)"
+              exit 0
+            fi
+            echo "attempt ${i}: HTTP ${code:-none}"
+            sleep 5
+          done
+          echo "::error::/ready never returned 200; the deploy did not come up"
+          exit 1

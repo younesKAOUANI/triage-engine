@@ -1,5 +1,7 @@
 # Triage Engine
 
+[![ci](https://github.com/younesKAOUANI/triage-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/younesKAOUANI/triage-engine/actions/workflows/ci.yml)
+
 An event-processing service that ingests support tickets, classifies them with an
 LLM, and notifies a downstream system. NestJS, Postgres, Redis/BullMQ, Mistral.
 

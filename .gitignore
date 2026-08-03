@@ -5,3 +5,9 @@ coverage/
 *.log
 .DS_Store
 *.tsbuildinfo
+
+# Database dumps land here, inside the working tree the deploy job runs
+# `git checkout -f` in. Untracked files survive that, but they would not survive
+# a `git clean -fd` -- which is exactly the sort of thing someone reaches for
+# while recovering, and the backups are what they would be recovering with.
+backups/

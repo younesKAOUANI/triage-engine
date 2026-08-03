@@ -35,7 +35,10 @@ export function buildDataSourceOptions(env: EnvVars): DataSourceOptions {
     entities: [join(root, '**', `*.entity.${ext}`)],
     migrations: [join(root, 'migrations', `*.${ext}`)],
     migrationsTableName: 'typeorm_migrations',
-    logging: env.NODE_ENV === 'development' ? ['error', 'warn', 'migration'] : ['error'],
+    logging:
+      env.NODE_ENV === 'development'
+        ? ['error', 'warn', 'migration']
+        : ['error'],
   };
 }
 

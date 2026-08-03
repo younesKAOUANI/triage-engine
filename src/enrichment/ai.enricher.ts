@@ -4,10 +4,7 @@ import { APP_ENV } from '../config/app-config.module';
 import { EnvVars } from '../config/env.validation';
 import { MetricsService } from '../observability/metrics.service';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
-import {
-  EnrichmentSource,
-  EnrichmentStatus,
-} from '../tickets/ticket.enums';
+import { EnrichmentSource, EnrichmentStatus } from '../tickets/ticket.enums';
 import { Enricher, EnrichmentOutcome } from '../pipeline/enricher.port';
 import { FallbackClassifier } from './fallback.classifier';
 import { LlmEnrichment } from './llm-response.schema';

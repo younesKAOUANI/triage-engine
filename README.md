@@ -185,11 +185,13 @@ migrations, never `synchronize`.
 
 ### Deploying it
 
-A single host runs the whole stack behind Caddy, which handles TLS
-automatically. Postgres and Redis are containers on an internal network with no
-route off the box, and nothing but Caddy publishes a port. Pushing to `main`
-runs the tests, builds an image, pushes it to GHCR and deploys it by commit sha,
-then polls `/ready` and fails the run if the new revision never serves traffic.
+A host shared with two other projects runs the stack behind a single edge Caddy,
+which handles TLS for all of them automatically and lives in the [portfolio
+repository](https://github.com/younesKAOUANI/portfolio/tree/main/deploy/edge).
+Postgres and Redis are containers on an internal network with no route off the
+box, and this stack publishes no port at all. Pushing to `main` runs the tests,
+builds an image, pushes it to GHCR and deploys it by commit sha, then polls
+`/ready` and fails the run if the new revision never serves traffic.
 
 ```bash
 make prod-up     # start the stack (needs .env from .env.production.example)

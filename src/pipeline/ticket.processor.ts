@@ -96,7 +96,12 @@ export class TicketProcessor extends WorkerHost {
 
       this.metrics.eventsProcessed.inc();
       this.logger.log(
-        { jobId: job.id, ticketId: ticket.id, status: outcome.status, source: outcome.source },
+        {
+          jobId: job.id,
+          ticketId: ticket.id,
+          status: outcome.status,
+          source: outcome.source,
+        },
         'ticket processed',
       );
     });
@@ -172,11 +177,26 @@ export class TicketProcessor extends WorkerHost {
     const delay = backoffWithJitter(attempt, {
       baseMs: this.env.ENRICHMENT_UPGRADE_BACKOFF_MS,
     });
-    await this.producer.enqueueUpgrade({ ...data, upgradeAttempt: attempt }, delay);
+    await this.producer.enqueueUpgrade(
+      { ...data, upgradeAttempt: attempt },
+      delay,
+    );
     this.logger.log(
       { ticketId: data.ticketId, attempt, delayMs: delay },
       'scheduled delayed AI re-enrichment (upgrade)',
     );
+  }
+
+  /**
+   * Worker-level errors: a lost Redis connection, a failure inside BullMQ's own
+   * run loop, a script error. These are NOT job failures and never reach
+   * `onFailed`. Without a listener here they go to Node's default handling and
+   * bypass Pino entirely, so the structured logs an operator greps show nothing
+   * at the moment the queue stops working.
+   */
+  @OnWorkerEvent('error')
+  onWorkerError(error: Error): void {
+    this.logger.error({ err: error }, 'pipeline worker error');
   }
 
   /**
@@ -325,8 +345,6 @@ export class TicketProcessor extends WorkerHost {
       timer = setTimeout(() => reject(new Error(message)), ms);
       timer.unref?.();
     });
-    return Promise.race([promise, timeout]).finally(() =>
-      clearTimeout(timer),
-    ) as Promise<T>;
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
 }

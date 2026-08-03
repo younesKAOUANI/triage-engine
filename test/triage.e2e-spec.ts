@@ -22,12 +22,16 @@ describe('Triage engine (integration)', () => {
   };
 
   const post = (body: unknown, idempotencyKey?: string) => {
-    const req = request(h.http).post('/events').send(body as object);
+    const req = request(h.http)
+      .post('/events')
+      .send(body as object);
     return idempotencyKey ? req.set('Idempotency-Key', idempotencyKey) : req;
   };
   const getTicket = (id: string) => request(h.http).get(`/tickets/${id}`);
   const ticketCount = async (): Promise<number> => {
-    const rows = await h.dataSource.query('SELECT count(*)::int AS c FROM tickets');
+    const rows = await h.dataSource.query(
+      'SELECT count(*)::int AS c FROM tickets',
+    );
     return rows[0].c;
   };
   const gauge = async (name: string, label: string): Promise<number | null> => {
@@ -67,7 +71,10 @@ describe('Triage engine (integration)', () => {
 
     it('the same key with a different payload is a 409 conflict', async () => {
       await post(sampleBody, 'k-conflict').expect(202);
-      await post({ ...sampleBody, body: 'totally different content' }, 'k-conflict').expect(409);
+      await post(
+        { ...sampleBody, body: 'totally different content' },
+        'k-conflict',
+      ).expect(409);
     });
 
     it('rejects keys that cannot become a job id, before writing anything', async () => {
@@ -124,10 +131,12 @@ describe('Triage engine (integration)', () => {
 
       const triaged = `ticket:${id}:ticket.triaged:v1`;
       await waitFor(
-        async () => h.webhook.count(triaged),
+        () => h.webhook.count(triaged),
         (c) => c === 1,
       );
-      expect(h.webhook.count(`ticket:${id}:ticket.enrichment_upgraded:v1`)).toBe(0);
+      expect(
+        h.webhook.count(`ticket:${id}:ticket.enrichment_upgraded:v1`),
+      ).toBe(0);
     });
   });
 
@@ -140,7 +149,7 @@ describe('Triage engine (integration)', () => {
       const dedupKey = `ticket:${id}:ticket.triaged:v1`;
 
       await waitFor(
-        async () => h.webhook.count(dedupKey),
+        () => h.webhook.count(dedupKey),
         (c) => c === 1,
         { timeoutMs: 15000 },
       );
@@ -150,7 +159,10 @@ describe('Triage engine (integration)', () => {
       const row = await waitFor(
         () =>
           h.dataSource
-            .query(`SELECT status, attempts FROM outbox_messages WHERE dedup_key = $1`, [dedupKey])
+            .query(
+              `SELECT status, attempts FROM outbox_messages WHERE dedup_key = $1`,
+              [dedupKey],
+            )
             .then((r) => r[0]),
         (r) => r?.status === 'SENT',
         { timeoutMs: 15000 },
@@ -192,7 +204,10 @@ describe('Triage engine (integration)', () => {
     it('opens the circuit breaker after repeated failures', async () => {
       h.mistral.setMode('fail');
       for (let i = 0; i < 8; i++) {
-        await post({ ...sampleBody, subject: `fail ${i}` }, `k-breaker-${i}`).expect(202);
+        await post(
+          { ...sampleBody, subject: `fail ${i}` },
+          `k-breaker-${i}`,
+        ).expect(202);
       }
       const state = await waitFor(
         () => gauge('circuit_breaker_state', 'mistral'),
@@ -215,14 +230,15 @@ describe('Triage engine (integration)', () => {
       h.mistral.setMode('ok');
       const upgraded = await waitFor(
         () => getTicket(id).then((r) => r.body),
-        (t) => t.enrichment.status === 'ENRICHED' && t.enrichment.source === 'AI',
+        (t) =>
+          t.enrichment.status === 'ENRICHED' && t.enrichment.source === 'AI',
         { timeoutMs: 20000 },
       );
       expect(upgraded.enrichment.source).toBe('AI');
 
       // Both side effects delivered, each exactly once, on distinct dedup keys.
       await waitFor(
-        async () => h.webhook.count(`ticket:${id}:ticket.enrichment_upgraded:v1`),
+        () => h.webhook.count(`ticket:${id}:ticket.enrichment_upgraded:v1`),
         (c) => c === 1,
         { timeoutMs: 20000 },
       );
@@ -254,11 +270,16 @@ describe('Triage engine (integration)', () => {
       });
 
       const list = await waitFor(
-        () => request(h.http).get('/dlq').then((r) => r.body),
+        () =>
+          request(h.http)
+            .get('/dlq')
+            .then((r) => r.body),
         (b) => b.count >= 1,
         { timeoutMs: 15000 },
       );
-      const dl = list.items.find((i: { idempotencyKey: string }) => i.idempotencyKey === key);
+      const dl = list.items.find(
+        (i: { idempotencyKey: string }) => i.idempotencyKey === key,
+      );
       expect(dl).toBeDefined();
       expect(dl.attemptsMade).toBe(3);
       expect(dl.error.message).toBeTruthy();
@@ -280,7 +301,11 @@ describe('Triage engine (integration)', () => {
       const before = await ticketCount();
 
       // Synthesize a dead letter for it (as the worker's failure handler would).
-      const payload = JSON.stringify({ idempotencyKey: 'dlq-real', ticketId: id, eventId });
+      const payload = JSON.stringify({
+        idempotencyKey: 'dlq-real',
+        ticketId: id,
+        eventId,
+      });
       const inserted = await h.dataSource.query(
         `INSERT INTO dead_letters
            (queue, job_id, idempotency_key, payload, error_message, attempts_made, status, failed_at)
@@ -390,10 +415,21 @@ describe('Triage engine (integration)', () => {
         expect(codes).toContain(429); // the limit actually engages
 
         // Health, readiness and metrics opt out. A throttled probe would be
-        // read as an outage, and throttling the bundled sink would throttle the
-        // relay's own deliveries.
+        // read as an outage.
         for (const path of ['/health', '/ready', '/metrics']) {
           await request(h.http).get(path).expect(200);
+        }
+
+        // The bundled sink must be exempt too, and this is the assertion that
+        // matters most: the outbox relay dispatches to it, so a throttled sink
+        // turns ordinary delivery volume into 429s, retries, and eventually
+        // permanently abandoned side effects. Well past RATE_LIMIT_WRITES.
+        for (let i = 0; i < 40; i++) {
+          await request(h.http)
+            .post('/_sink/webhook')
+            .set('Idempotency-Key', `sink-burst-${i}`)
+            .send({ ping: i })
+            .expect(200);
         }
       } finally {
         // Let the window lapse even if an expectation failed, so this test
@@ -424,7 +460,8 @@ describe('Triage engine (integration)', () => {
 
       const upgraded = await waitFor(
         () => getTicket(id).then((r) => r.body),
-        (t) => t.enrichment.status === 'ENRICHED' && t.enrichment.source === 'AI',
+        (t) =>
+          t.enrichment.status === 'ENRICHED' && t.enrichment.source === 'AI',
         { timeoutMs: 15000 },
       );
       expect(upgraded.enrichment.source).toBe('AI');

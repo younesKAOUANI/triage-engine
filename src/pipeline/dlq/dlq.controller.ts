@@ -13,7 +13,10 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { WRITE_LIMIT } from '../../common/rate-limit/rate-limit.module';
 import { DlqService } from './dlq.service';
-import { DeadLetterEntity, DeadLetterStatus } from './entities/dead-letter.entity';
+import {
+  DeadLetterEntity,
+  DeadLetterStatus,
+} from './entities/dead-letter.entity';
 
 @Controller('dlq')
 export class DlqController {

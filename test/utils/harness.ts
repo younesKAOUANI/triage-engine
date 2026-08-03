@@ -5,10 +5,7 @@ import {
   PostgreSqlContainer,
   StartedPostgreSqlContainer,
 } from '@testcontainers/postgresql';
-import {
-  RedisContainer,
-  StartedRedisContainer,
-} from '@testcontainers/redis';
+import { RedisContainer, StartedRedisContainer } from '@testcontainers/redis';
 import { Queue, Worker } from 'bullmq';
 import { Logger } from 'nestjs-pino';
 import { DataSource } from 'typeorm';
@@ -194,9 +191,13 @@ export async function startHarness(): Promise<Harness> {
   };
 }
 
-/** Poll `read` until `predicate` is true or the timeout elapses. */
+/**
+ * Poll `read` until `predicate` is true or the timeout elapses. `read` may be
+ * synchronous: several call sites just inspect the in-memory webhook recorder,
+ * and forcing those to be `async` only to satisfy the signature is noise.
+ */
 export async function waitFor<T>(
-  read: () => Promise<T>,
+  read: () => T | Promise<T>,
   predicate: (value: T) => boolean,
   { timeoutMs = 10000, intervalMs = 100 } = {},
 ): Promise<T> {

@@ -17,12 +17,19 @@ export class RedisHealthIndicator {
 
   async isHealthy(key: string, timeoutMs = 2000) {
     const indicator = this.healthIndicatorService.check(key);
+    let timer: NodeJS.Timeout | undefined;
     try {
-      const pong = await Promise.race([
+      // Typed as `string`, not the literal ioredis declares: a half-open or
+      // proxied connection can reply with something else, and that is precisely
+      // the case this probe exists to catch.
+      const pong: string = await Promise.race([
         this.redis.ping(),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('redis ping timed out')), timeoutMs),
-        ),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error('redis ping timed out')),
+            timeoutMs,
+          );
+        }),
       ]);
       if (pong !== 'PONG') {
         return indicator.down({ message: `unexpected ping reply: ${pong}` });
@@ -30,6 +37,10 @@ export class RedisHealthIndicator {
       return indicator.up();
     } catch (error) {
       return indicator.down({ message: (error as Error).message });
+    } finally {
+      // Readiness is probed every few seconds; leaving the loser of the race
+      // pending would queue a timer per probe for no reason.
+      clearTimeout(timer);
     }
   }
 }

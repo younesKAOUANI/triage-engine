@@ -1,0 +1,16 @@
+{
+  // The test suite was previously type-checked by nothing: tsconfig.json
+  // excludes `test`, and ts-jest runs with `diagnostics: false` for speed. A
+  // syntactically broken spec could therefore reach CI and only fail at runtime.
+  // `npm run typecheck` now covers both projects.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["jest", "node"]
+  },
+  // `exclude` MUST be restated. It is inherited from the base config, which
+  // excludes `test`, and exclude filters include — so without this the project
+  // resolves to zero test files and type-checks nothing while still passing.
+  "exclude": ["node_modules", "dist"],
+  "include": ["test/**/*", "src/**/*"]
+}

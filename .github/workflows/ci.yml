@@ -26,8 +26,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Covers src AND test: the test project was previously type-checked by
+      # nothing, so a broken spec could reach CI and fail only at runtime.
       - name: Type-check (strict)
         run: npm run typecheck
+
+      # no-floating-promises is the rule that matters here: a fire-and-forget
+      # async call in a worker event handler is how a dead letter goes missing,
+      # and type-checking alone will not find it.
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
 
       - name: Build
         run: npm run build
@@ -132,8 +143,22 @@ jobs:
               && sed -i "s|^APP_IMAGE=.*|APP_IMAGE=$APP_IMAGE|" .env \
               || echo "APP_IMAGE=$APP_IMAGE" >> .env
 
+            # The shared network the edge Caddy reaches this stack over. It is
+            # declared external, so without it compose fails with a message that
+            # reads like a compose-file error rather than a missing host setup.
+            if ! docker network inspect edge >/dev/null 2>&1; then
+              echo "::error::the 'edge' docker network does not exist on the host."
+              echo "Run 'docker network create edge'. See the portfolio repository, deploy/edge."
+              exit 1
+            fi
+
             docker compose -f docker-compose.prod.yml pull app
+            # --remove-orphans retires the caddy container from the topology
+            # this deployment used to have. Scoped to this compose project, so
+            # it cannot touch the other two stacks on the box.
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            # Dangling only. `-a` is daemon-wide and would collect the other two
+            # projects' previous releases, which are their rollback targets.
             docker image prune -f
 
       - name: Verify the deployment is serving

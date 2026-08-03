@@ -9,6 +9,30 @@ export const READ_LIMIT = 'read';
 export const WRITE_LIMIT = 'write';
 
 /**
+ * Exempt a route from rate limiting entirely: `@SkipThrottle(SKIP_ALL)`.
+ *
+ * A bare `@SkipThrottle()` does NOT do this. It defaults to `{ default: true }`
+ * and writes its metadata under the name `default`, while the guard looks up a
+ * skip flag per *configured* throttler name. Nothing here is called `default`,
+ * so the bare form matches nothing and silently exempts nothing — which throttled
+ * the health probes and, worse, the bundled sink the outbox relay dispatches to,
+ * turning ordinary delivery volume into permanently abandoned side effects.
+ */
+export const SKIP_ALL = {
+  [READ_LIMIT]: true,
+  [WRITE_LIMIT]: true,
+} as const;
+
+/**
+ * Restrict a read route to the (generous) read bucket.
+ *
+ * Every configured throttler applies to every route unless skipped, so without
+ * this a read is also charged against the much tighter write bucket and
+ * RATE_LIMIT_GLOBAL never takes effect.
+ */
+export const READS_ONLY = { [WRITE_LIMIT]: true } as const;
+
+/**
  * Per-IP rate limiting for the public deployment.
  *
  * Two named buckets rather than one: reads are what make the demo inspectable

@@ -1,7 +1,11 @@
 import { Controller, Get, Param, ParseUUIDPipe } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
+import { READS_ONLY } from '../common/rate-limit/rate-limit.module';
 import { TicketEntity } from './entities/ticket.entity';
 import { TicketsService } from './tickets.service';
 
+// Read-only: charge against the read bucket, not the tighter write one.
+@SkipThrottle(READS_ONLY)
 @Controller('tickets')
 export class TicketsController {
   constructor(private readonly tickets: TicketsService) {}

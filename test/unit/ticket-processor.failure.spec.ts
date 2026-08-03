@@ -55,10 +55,7 @@ describe('TicketProcessor.onFailed — terminal failure classification', () => {
   // ── Terminal despite attempts remaining ────────────────────────────────────
 
   it('dead-letters an UnrecoverableError while attempts remain', async () => {
-    await processor.onFailed(
-      makeJob(),
-      new UnrecoverableError('stalled out'),
-    );
+    await processor.onFailed(makeJob(), new UnrecoverableError('stalled out'));
     expect(dlq.recordDeadLetter).toHaveBeenCalledTimes(1);
   });
 
@@ -112,7 +109,9 @@ describe('TicketProcessor.onFailed — terminal failure classification', () => {
   });
 
   it('assumes terminal when the isFailed() probe hangs', async () => {
-    const job = makeJob({ isFailed: jest.fn().mockReturnValue(new Promise(() => {})) });
+    const job = makeJob({
+      isFailed: jest.fn().mockReturnValue(new Promise(() => {})),
+    });
     await processor.onFailed(job, new Error('transient'));
     expect(dlq.recordDeadLetter).toHaveBeenCalledTimes(1);
   }, 10000);
@@ -122,7 +121,10 @@ describe('TicketProcessor.onFailed — terminal failure classification', () => {
   it('does not reject when the dead-letter write fails, and flags it', async () => {
     dlq.recordDeadLetter.mockRejectedValue(new Error('postgres down'));
     await expect(
-      processor.onFailed(makeJob({ attemptsMade: MAX_ATTEMPTS }), new Error('boom')),
+      processor.onFailed(
+        makeJob({ attemptsMade: MAX_ATTEMPTS }),
+        new Error('boom'),
+      ),
     ).resolves.toBeUndefined();
     expect(dispositions()).toContain('dead_letter_write_failed');
   });

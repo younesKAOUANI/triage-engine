@@ -1,8 +1,5 @@
 import { z } from 'zod';
-import {
-  TicketCategory,
-  TicketPriority,
-} from '../tickets/ticket.enums';
+import { TicketCategory, TicketPriority } from '../tickets/ticket.enums';
 
 /**
  * The exact shape we require back from the model. We never trust the model's

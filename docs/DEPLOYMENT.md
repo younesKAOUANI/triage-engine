@@ -1,9 +1,15 @@
 # Deployment
 
-Single host, Docker Compose, Caddy for TLS. Postgres and Redis run as containers
-alongside the app. Deploys happen from GitHub Actions on every push to `main`.
+Docker Compose on a shared host. Postgres and Redis run as containers alongside
+the app. Deploys happen from GitHub Actions on every push to `main`.
 
 Live at <https://triage-engine.youneskaouani.dev>.
+
+**TLS is not in this repository.** The box also serves the portfolio and
+Aliquot, and one edge Caddy terminates for every name on it. Host preparation,
+DNS and the certificate story live in the [`deploy/edge`](https://github.com/younesKAOUANI/portfolio/tree/main/deploy/edge)
+directory of the portfolio repository — read that first if you are building the
+machine from nothing.
 
 ---
 
@@ -12,26 +18,31 @@ Live at <https://triage-engine.youneskaouani.dev>.
 ```
                     ┌────────────────────────── the box ──────────────────────────┐
                     │                                                             │
-  :443 ────────────►│  caddy ──► app ──┬──► postgres   (network: data, no egress) │
-  (TLS, automatic)  │   edge    edge   └──► redis      (network: data, no egress) │
-                    │           +data                                             │
-  Mistral API ◄─────┼───────────┘ (app reaches out over `edge`)                   │
+  :443 ────────────►│  edge ──► app ──┬──► postgres   (network: data, no egress)  │
+  (shared, all      │  caddy   edge   └──► redis      (network: data, no egress)  │
+   three sites)     │          +data                                              │
+  Mistral API ◄─────┼──────────┘ (app reaches out over `edge`)                    │
                     └─────────────────────────────────────────────────────────────┘
 ```
 
-Only Caddy publishes ports. The app, Postgres and Redis are unreachable from
-outside the host. The `data` network is marked `internal`, so the datastores have
-no route off the box at all; the app sits on both networks because it needs
-inbound traffic from Caddy and outbound access to the model API.
+This stack publishes no ports at all. The app, Postgres and Redis are
+unreachable from outside the host; the app is reached by the container alias
+`triage-app` on the shared `edge` network. `data` is marked `internal`, so the
+datastores have no route off the box; the app sits on both because it needs
+inbound traffic from the edge and outbound access to the model API.
 
 ## First-time setup
 
-**1. DNS.** Point an `A` record for `triage-engine.youneskaouani.dev` at the
-server before the first boot. Caddy solves an ACME HTTP-01 challenge on port 80,
-so both 80 and 443 must be open — and must stay open, or renewal starts failing
-about 60 days later without any obvious symptom.
+**1. Host and DNS.** Both are the edge runbook's job. In short: prepare the box,
+`docker network create edge`, and point an `A` record for
+`triage-engine.youneskaouani.dev` at the server before the edge Caddy first
+starts. It solves an ACME HTTP-01 challenge on port 80, so both 80 and 443 must
+be open — and must stay open, or renewal starts failing about 60 days later
+without any obvious symptom.
 
 **2. Server prerequisites.** Docker Engine with the Compose plugin, and git.
+Installed by the shared bootstrap script; listed here because this stack needs
+them whether or not you used it.
 
 **3. Clone and configure.**
 
@@ -51,10 +62,15 @@ alone. It is the only place secrets live on the box.
 **4. First boot.**
 
 ```bash
+docker network inspect edge          # must exist; see the edge runbook
 docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml logs -f caddy   # watch certificate issuance
+docker compose -f docker-compose.prod.yml logs -f app
 curl https://triage-engine.youneskaouani.dev/ready
 ```
+
+If that `curl` 502s, the edge is up and this stack is not on its network — which
+is what happens when the stack was started before `docker network create edge`.
+`docker network inspect edge` lists what is actually attached.
 
 Migrations run on boot (`DB_RUN_MIGRATIONS_ON_BOOT=true`), which is safe with a
 single app container. If you ever scale to more than one, turn it off and run
@@ -166,9 +182,14 @@ the deploy verification gate on.
 keep that from being a liability:
 
 - **Rate limiting** per client IP: 20 writes and 120 reads per minute by default.
-  This depends on `TRUST_PROXY=true` and Caddy setting `X-Forwarded-For`; without
-  it every request looks like it came from Caddy and one caller would exhaust the
-  bucket for everyone. Health, readiness, metrics and the bundled sink are exempt
+  This depends on `TRUST_PROXY=true` and the edge Caddy setting
+  `X-Forwarded-For`; without it every request looks like it came from Caddy and
+  one caller would exhaust the bucket for everyone. It is safe in the other
+  direction because Caddy writes that header from the real peer and *discards*
+  whatever the caller sent, rather than appending to it — so an address cannot
+  be forged. `TRUST_PROXY=true` on a container reachable without a proxy in
+  front would be exactly the opposite. Health, readiness, metrics and the
+  bundled sink are exempt
   — a throttled probe reads as an outage, and throttling the sink would throttle
   the engine's own deliveries.
 - **Retention**: terminal rows older than `RETENTION_MAX_AGE_MS` (7 days) are

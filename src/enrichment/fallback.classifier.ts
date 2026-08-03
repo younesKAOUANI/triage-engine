@@ -1,9 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { TicketEntity } from '../tickets/entities/ticket.entity';
-import {
-  TicketCategory,
-  TicketPriority,
-} from '../tickets/ticket.enums';
+import { TicketCategory, TicketPriority } from '../tickets/ticket.enums';
 import { LlmEnrichment } from './llm-response.schema';
 
 /**
@@ -16,19 +13,99 @@ import { LlmEnrichment } from './llm-response.schema';
  */
 @Injectable()
 export class FallbackClassifier {
-  private static readonly CATEGORY_KEYWORDS: Array<
-    [TicketCategory, string[]]
-  > = [
-    [TicketCategory.BILLING, ['charge', 'invoice', 'refund', 'payment', 'billed', 'subscription', 'price']],
-    [TicketCategory.ACCOUNT, ['password', 'login', 'log in', 'locked', 'access', 'sign in', 'account', '2fa', 'reset']],
-    [TicketCategory.TECHNICAL, ['crash', 'error', 'bug', 'broken', '500', 'fails', 'not working', "doesn't work", 'freeze', 'exception']],
-    [TicketCategory.FEATURE_REQUEST, ['feature', 'request', 'would be nice', 'please add', 'suggestion', 'wish']],
-    [TicketCategory.COMPLAINT, ['terrible', 'worst', 'angry', 'unacceptable', 'disappointed', 'awful', 'frustrated']],
-  ];
+  private static readonly CATEGORY_KEYWORDS: Array<[TicketCategory, string[]]> =
+    [
+      [
+        TicketCategory.BILLING,
+        [
+          'charge',
+          'invoice',
+          'refund',
+          'payment',
+          'billed',
+          'subscription',
+          'price',
+        ],
+      ],
+      [
+        TicketCategory.ACCOUNT,
+        [
+          'password',
+          'login',
+          'log in',
+          'locked',
+          'access',
+          'sign in',
+          'account',
+          '2fa',
+          'reset',
+        ],
+      ],
+      [
+        TicketCategory.TECHNICAL,
+        [
+          'crash',
+          'error',
+          'bug',
+          'broken',
+          '500',
+          'fails',
+          'not working',
+          "doesn't work",
+          'freeze',
+          'exception',
+        ],
+      ],
+      [
+        TicketCategory.FEATURE_REQUEST,
+        [
+          'feature',
+          'request',
+          'would be nice',
+          'please add',
+          'suggestion',
+          'wish',
+        ],
+      ],
+      [
+        TicketCategory.COMPLAINT,
+        [
+          'terrible',
+          'worst',
+          'angry',
+          'unacceptable',
+          'disappointed',
+          'awful',
+          'frustrated',
+        ],
+      ],
+    ];
 
-  private static readonly URGENT = ['urgent', 'asap', 'immediately', 'critical', 'down', 'outage', 'emergency'];
-  private static readonly HIGH = ['crash', 'cannot', "can't", 'blocked', 'broken', 'data loss', 'security'];
-  private static readonly LOW = ['question', 'how do i', 'how to', 'wondering', 'clarify'];
+  private static readonly URGENT = [
+    'urgent',
+    'asap',
+    'immediately',
+    'critical',
+    'down',
+    'outage',
+    'emergency',
+  ];
+  private static readonly HIGH = [
+    'crash',
+    'cannot',
+    "can't",
+    'blocked',
+    'broken',
+    'data loss',
+    'security',
+  ];
+  private static readonly LOW = [
+    'question',
+    'how do i',
+    'how to',
+    'wondering',
+    'clarify',
+  ];
 
   classify(ticket: TicketEntity): LlmEnrichment {
     const text = `${ticket.subject} ${ticket.body}`.toLowerCase();

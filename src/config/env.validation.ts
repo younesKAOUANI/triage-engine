@@ -80,7 +80,11 @@ export const envSchema = z.object({
   // delay to attempt an AI upgrade later (decoupled from breaker state to avoid a
   // recovery stampede — see ADR-0005).
   ENRICHMENT_UPGRADE_MAX_ATTEMPTS: z.coerce.number().int().min(0).default(5),
-  ENRICHMENT_UPGRADE_BACKOFF_MS: z.coerce.number().int().min(1000).default(30000),
+  ENRICHMENT_UPGRADE_BACKOFF_MS: z.coerce
+    .number()
+    .int()
+    .min(1000)
+    .default(30000),
 
   // Reconciliation sweep (ADR-0009): periodically re-drives tickets stuck DEGRADED
   // (lost upgrade job, crash, or exhausted attempts) so none stays degraded forever.
@@ -103,7 +107,11 @@ export const envSchema = z.object({
   // without bound are pruned on a schedule (ADR-0001 flags idempotency_keys in
   // particular). Set RETENTION_ENABLED=false to keep everything.
   RETENTION_ENABLED: envBool(false),
-  RETENTION_SWEEP_INTERVAL_MS: z.coerce.number().int().min(60000).default(3600000),
+  RETENTION_SWEEP_INTERVAL_MS: z.coerce
+    .number()
+    .int()
+    .min(60000)
+    .default(3600000),
   RETENTION_MAX_AGE_MS: z.coerce.number().int().min(60000).default(604800000),
 
   // Circuit breaker (opossum)

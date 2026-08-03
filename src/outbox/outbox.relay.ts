@@ -70,7 +70,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
     this.scheduleNext(0);
   }
 
-  async onModuleDestroy(): Promise<void> {
+  onModuleDestroy(): void {
     this.stopped = true;
     if (this.timer) {
       clearTimeout(this.timer);
@@ -133,7 +133,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   ): Promise<void> {
     const correlationId =
       typeof row.payload?.correlationId === 'string'
-        ? (row.payload.correlationId as string)
+        ? row.payload.correlationId
         : undefined;
     const stopTimer = this.metrics.outboxDispatchLatency.startTimer();
 

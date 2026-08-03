@@ -11,7 +11,7 @@ function canonicalize(value: unknown): unknown {
     return value.map(canonicalize);
   }
   if (value && typeof value === 'object') {
-    return Object.keys(value as Record<string, unknown>)
+    return Object.keys(value)
       .sort()
       .reduce<Record<string, unknown>>((acc, key) => {
         acc[key] = canonicalize((value as Record<string, unknown>)[key]);

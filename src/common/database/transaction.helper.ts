@@ -1,10 +1,7 @@
 import { DataSource, EntityManager, QueryRunner } from 'typeorm';
 
 export type IsolationLevel =
-  | 'READ UNCOMMITTED'
-  | 'READ COMMITTED'
-  | 'REPEATABLE READ'
-  | 'SERIALIZABLE';
+  'READ UNCOMMITTED' | 'READ COMMITTED' | 'REPEATABLE READ' | 'SERIALIZABLE';
 
 /**
  * Run `work` inside a single database transaction with the connect / commit /

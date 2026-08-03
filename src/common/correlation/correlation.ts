@@ -28,7 +28,10 @@ export function runWithCorrelation<T>(
   correlationId: string | undefined,
   fn: () => T,
 ): T {
-  return correlationStorage.run({ correlationId: correlationId ?? randomUUID() }, fn);
+  return correlationStorage.run(
+    { correlationId: correlationId ?? randomUUID() },
+    fn,
+  );
 }
 
 /** Current correlation id, or undefined when called outside any scope. */

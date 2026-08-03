@@ -45,17 +45,16 @@ async function main(): Promise<void> {
       body: JSON.stringify(sample),
     });
     const json = await res.json();
-    // eslint-disable-next-line no-console
+
     console.log(`POST /events -> ${res.status}`, json);
   }
-  // eslint-disable-next-line no-console
+
   console.log(`\nInspect a ticket:  GET ${BASE_URL}/tickets/<id>`);
-  // eslint-disable-next-line no-console
+
   console.log(`Webhook sink:      GET ${BASE_URL}/_sink/deliveries`);
 }
 
 main().catch((error) => {
-  // eslint-disable-next-line no-console
   console.error('seed failed:', error);
   process.exit(1);
 });

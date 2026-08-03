@@ -48,7 +48,11 @@ export class OutboxMessageEntity {
   attempts!: number;
 
   /** When this row becomes eligible for (re)dispatch. Drives backoff. */
-  @Column({ type: 'timestamptz', name: 'next_attempt_at', default: () => 'now()' })
+  @Column({
+    type: 'timestamptz',
+    name: 'next_attempt_at',
+    default: () => 'now()',
+  })
   nextAttemptAt!: Date;
 
   @Column({ type: 'text', name: 'last_error', nullable: true })

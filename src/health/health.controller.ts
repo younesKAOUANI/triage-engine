@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import { SKIP_ALL } from '../common/rate-limit/rate-limit.module';
 import {
   HealthCheck,
   HealthCheckService,
@@ -17,7 +18,7 @@ import { RedisHealthIndicator } from './redis.health';
  *    balancer without killing it, so it can recover.
  */
 // A throttled probe would be read as the instance being down.
-@SkipThrottle()
+@SkipThrottle(SKIP_ALL)
 @Controller()
 export class HealthController {
   constructor(

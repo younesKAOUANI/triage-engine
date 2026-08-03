@@ -16,7 +16,10 @@ export interface BackoffOptions {
  * Used in three places that all need the same behaviour: BullMQ pipeline retries,
  * the outbox relay's redelivery schedule, and the in-call Mistral retry loop.
  */
-export function backoffWithJitter(attempt: number, opts: BackoffOptions): number {
+export function backoffWithJitter(
+  attempt: number,
+  opts: BackoffOptions,
+): number {
   const cap = opts.maxMs ?? Number.MAX_SAFE_INTEGER;
   const exp = Math.min(cap, opts.baseMs * 2 ** Math.max(0, attempt - 1));
   const half = exp / 2;

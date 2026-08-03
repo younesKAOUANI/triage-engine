@@ -8,6 +8,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
+import { SKIP_ALL } from '../common/rate-limit/rate-limit.module';
 
 /**
  * A stand-in for an external notification consumer, so the whole stack runs
@@ -21,7 +22,7 @@ import { SkipThrottle } from '@nestjs/throttler';
 // The relay dispatches to this controller in the bundled demo setup, so it
 // must never be rate limited: throttling it would throttle the engine's own
 // deliveries and manufacture outbox retries.
-@SkipThrottle()
+@SkipThrottle(SKIP_ALL)
 @Controller('_sink')
 export class SinkController {
   private readonly logger = new Logger('WebhookSink');

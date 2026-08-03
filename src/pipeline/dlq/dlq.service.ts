@@ -10,7 +10,10 @@ import { Repository } from 'typeorm';
 import { MetricsService } from '../../observability/metrics.service';
 import { PipelineJobData } from '../pipeline.constants';
 import { PipelineProducer } from '../pipeline.producer';
-import { DeadLetterEntity, DeadLetterStatus } from './entities/dead-letter.entity';
+import {
+  DeadLetterEntity,
+  DeadLetterStatus,
+} from './entities/dead-letter.entity';
 
 export interface ListDlqOptions {
   status?: DeadLetterStatus;
@@ -115,7 +118,9 @@ export class DlqService {
       if (!exists) {
         throw new NotFoundException(`dead letter ${id} not found`);
       }
-      throw new ConflictException(`dead letter ${id} has already been replayed`);
+      throw new ConflictException(
+        `dead letter ${id} has already been replayed`,
+      );
     }
 
     const flippedRow = (flip.raw as Array<{ payload: unknown }>)[0];

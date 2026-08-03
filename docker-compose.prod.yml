@@ -1,38 +1,29 @@
-# Production stack for a single host: Caddy terminates TLS, the app and its
-# datastores sit behind it with no published ports.
+# Production stack for a shared host: the app and its datastores, with no
+# published ports at all.
 #
 #   docker compose -f docker-compose.prod.yml up -d
 #
+# TLS is not here. The box runs two other projects and there is one pair of
+# 80/443 between them, so a shared edge Caddy terminates for every name and
+# reaches this app by container name over the external `edge` network. That
+# Caddy lives in the portfolio repository, under deploy/edge.
+#
 # Differs from docker-compose.yml (the local dev stack) in ways that matter:
 #   - the app image is pulled from the registry, not built on the box
-#   - Postgres and Redis publish nothing to the host
-#   - Caddy owns 80/443 and holds the certificates in a named volume
+#   - nothing publishes a port to the host
 #   - logs are size-capped so a busy week cannot fill the disk
 
-services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp" # HTTP/3
-    environment:
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
-    volumes:
-      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      # Certificates and ACME account keys. Losing this volume means re-issuing
-      # on next boot, which Let's Encrypt rate limits — keep it.
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      app:
-        condition: service_healthy
-    networks: [edge]
-    logging: &logging
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+# Pinned rather than derived from the directory name. Container and volume names
+# are what `--remove-orphans` and every rollback command key on, and a clone into
+# a differently-named directory would otherwise quietly start a second, empty
+# stack alongside the real one.
+name: triage-engine
 
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
   app:
     image: ${APP_IMAGE:?set APP_IMAGE, e.g. ghcr.io/owner/triage-engine:sha}
     restart: unless-stopped
@@ -44,8 +35,10 @@ services:
       POSTGRES_PORT: 5432
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      # Caddy is the only thing that talks to the app, so honour its forwarded
-      # client address. Meaningless (and unsafe) without a proxy in front.
+      # The edge Caddy is the only thing that talks to the app, so honour its
+      # forwarded client address. Safe only because Caddy sets X-Forwarded-For
+      # from the real peer and discards any the caller supplied; meaningless and
+      # spoofable the moment this container is reachable without a proxy.
       TRUST_PROXY: "true"
       # The bundled sink stands in for a real consumer. Point WEBHOOK_TARGET_URL
       # at the actual downstream when there is one.
@@ -54,10 +47,16 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
-    # On both networks on purpose: `edge` carries Caddy's traffic in AND the
+    # On both networks on purpose: `edge` carries the proxied traffic in AND the
     # app's outbound calls to the Mistral API. `data` is egress-less and only
     # exists so Postgres and Redis have no route off the box.
-    networks: [edge, data]
+    networks:
+      edge:
+        # Compose would otherwise only alias this container as `app` on a
+        # network three projects share. The edge Caddyfile routes to this name.
+        aliases:
+          - triage-app
+      data: {}
     logging: *logging
 
   postgres:
@@ -95,12 +94,15 @@ services:
     logging: *logging
 
 networks:
+  # Shared with the portfolio and Aliquot, and created out of band rather than
+  # owned here — see the deploy/edge directory of the portfolio repository. No
+  # stack should be a startup dependency of the other two.
   edge:
+    name: edge
+    external: true
   data:
     internal: true # Postgres and Redis get no route off the host
 
 volumes:
-  caddy_data:
-  caddy_config:
   pgdata:
   redisdata:

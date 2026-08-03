@@ -162,11 +162,19 @@ export class InitialSchema1700000000000 implements MigrationInterface {
     await queryRunner.query(`DROP TABLE IF EXISTS "events"`);
 
     await queryRunner.query(`DROP TYPE IF EXISTS "dead_letters_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "outbox_messages_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "idempotency_keys_status_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "tickets_enrichment_source_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "outbox_messages_status_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "idempotency_keys_status_enum"`,
+    );
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "tickets_enrichment_source_enum"`,
+    );
     await queryRunner.query(`DROP TYPE IF EXISTS "tickets_priority_enum"`);
     await queryRunner.query(`DROP TYPE IF EXISTS "tickets_category_enum"`);
-    await queryRunner.query(`DROP TYPE IF EXISTS "tickets_enrichment_status_enum"`);
+    await queryRunner.query(
+      `DROP TYPE IF EXISTS "tickets_enrichment_status_enum"`,
+    );
   }
 }

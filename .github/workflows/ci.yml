@@ -104,6 +104,12 @@ jobs:
     needs: publish
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    # `packages: read` so GITHUB_TOKEN can authenticate the image pull on the
+    # host. Without it the token is issued without pull scope and the deploy
+    # fails with `denied` -- indistinguishable from the package being private.
+    permissions:
+      contents: read
+      packages: read
     # Point this at a GitHub Environment to gate deploys behind a manual
     # approval, or to scope the SSH secrets to production only.
     environment:
@@ -129,12 +135,18 @@ jobs:
             git fetch --depth 1 origin main
             git checkout -f FETCH_HEAD
 
-            # Only needed while the GHCR package is private. Publish the package
-            # and this becomes a no-op you can delete along with the secret.
-            if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
-              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
-                -u ${{ github.actor }} --password-stdin
-            fi
+            # Always authenticate, even though the package is public. The pull
+            # below asks for a tag that `publish` pushed seconds ago, and GHCR
+            # does not make a brand-new version anonymously readable instantly:
+            # the deploy failed once with `error from registry: denied` for a
+            # tag that pulled fine minutes later. An authenticated pull does not
+            # race the visibility propagation.
+            #
+            # GITHUB_TOKEN is scoped to this repository's own package and
+            # expires with the run, so nothing durable is left on the box --
+            # hence the logout at the end rather than a stored credential.
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io \
+              -u ${{ github.actor }} --password-stdin
 
             # Pin the exact image this pipeline built. Using :latest would make
             # the deployed revision ambiguous and break rollback.
@@ -160,6 +172,10 @@ jobs:
             # Dangling only. `-a` is daemon-wide and would collect the other two
             # projects' previous releases, which are their rollback targets.
             docker image prune -f
+
+            # The run-scoped token expires anyway, but leaving a credential file
+            # on a box three projects share is not a thing to do by omission.
+            docker logout ghcr.io
 
       - name: Verify the deployment is serving
         run: |

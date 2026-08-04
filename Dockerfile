@@ -21,6 +21,9 @@ ENV NODE_ENV=production
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --chown=node:node package.json ./
+# Static demo assets, served by useStaticAssets. Not compiled, so they are
+# copied straight from the context rather than out of the build stage.
+COPY --chown=node:node public ./public
 
 USER node
 EXPOSE 3000

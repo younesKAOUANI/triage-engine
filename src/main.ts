@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'node:path';
 import type { NextFunction, Request, Response } from 'express';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -13,7 +15,9 @@ import { EnvVars } from './config/env.validation';
 
 async function bootstrap(): Promise<void> {
   // bufferLogs so nothing logs with the default logger before Pino is installed.
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    bufferLogs: true,
+  });
   app.useLogger(app.get(Logger));
   app.flushLogs();
 
@@ -39,6 +43,14 @@ async function bootstrap(): Promise<void> {
   if (envVars.TRUST_PROXY) {
     app.getHttpAdapter().getInstance().set('trust proxy', 1);
   }
+
+  // Static demo assets. `index: false` matters: with it enabled express would
+  // answer `/` before the router does, and the JSON index that curl relies on
+  // would become unreachable.
+  app.useStaticAssets(join(__dirname, '..', 'public'), {
+    index: false,
+    maxAge: '1h',
+  });
 
   app.useGlobalPipes(
     new ValidationPipe({

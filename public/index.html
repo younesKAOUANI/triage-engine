@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>triage-engine — live demo</title>
+<meta name="description" content="Interactive demo of an idempotent event-processing engine: submit a ticket, watch it move through the pipeline, then try to break the guarantees.">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<header>
+  <div class="wrap head">
+    <div>
+      <h1>triage-engine</h1>
+      <p class="sub">Submit a support ticket, watch it move through the pipeline, then try to break it.</p>
+    </div>
+    <div class="status">
+      <span id="dot" class="dot"></span><span id="statusText">checking…</span>
+      <a class="gh" href="https://github.com/younesKAOUANI/triage-engine" target="_blank" rel="noopener">source ↗</a>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ── 1. submit ─────────────────────────────────────────────────────────── -->
+  <section>
+    <h2><span class="n">1</span> Send a ticket</h2>
+    <p class="lede">This is a real request to the live service. Everything below is the
+      actual response, not a mock.</p>
+
+    <div class="presets">
+      <button class="chip" data-preset="billing">Billing complaint</button>
+      <button class="chip" data-preset="account">Locked out</button>
+      <button class="chip" data-preset="outage">Urgent outage</button>
+      <button class="chip" data-preset="feature">Feature request</button>
+    </div>
+
+    <div class="grid2">
+      <label>Subject
+        <input id="subject" maxlength="500" value="Double charged on invoice">
+      </label>
+      <label>Idempotency key
+        <input id="key" maxlength="255">
+      </label>
+    </div>
+    <label>Body
+      <textarea id="body" rows="3" maxlength="10000">I was billed twice for the Pro plan this month, please refund the duplicate charge.</textarea>
+    </label>
+    <label>Requester email <span class="hint">optional</span>
+      <input id="email" value="alex@example.com">
+    </label>
+
+    <button id="submit" class="primary">Send ticket</button>
+    <span id="submitNote" class="note"></span>
+  </section>
+
+  <!-- ── 2. pipeline ───────────────────────────────────────────────────────── -->
+  <section id="pipelineSection" hidden>
+    <h2><span class="n">2</span> What happens to it</h2>
+    <p class="lede">Polled live. The service answers in milliseconds; the classification
+      lands a moment later because the work is queued, not done inline.</p>
+
+    <ol class="pipe" id="pipe">
+      <li data-stage="accepted"><span class="pin"></span>
+        <strong>Accepted</strong><em>202 — stored and queued, id returned immediately</em></li>
+      <li data-stage="queued"><span class="pin"></span>
+        <strong>Queued</strong><em>job id = your idempotency key, so a retry can't queue it twice</em></li>
+      <li data-stage="classified"><span class="pin"></span>
+        <strong>Classified</strong><em id="classifyDetail">waiting for the worker…</em></li>
+      <li data-stage="notified"><span class="pin"></span>
+        <strong>Notified</strong><em id="notifyDetail">notification written in the same transaction, then delivered</em></li>
+    </ol>
+
+    <div class="cols">
+      <div>
+        <h3>The ticket</h3>
+        <pre id="ticketJson" class="json">—</pre>
+      </div>
+      <div>
+        <h3>Last response</h3>
+        <pre id="lastResponse" class="json">—</pre>
+      </div>
+    </div>
+
+    <div id="degradedNote" class="callout" hidden>
+      <strong>DEGRADED is not an error.</strong> The model was unavailable — or this demo
+      runs without an API key — so a rule-based classifier ran instead and an AI upgrade was
+      queued for when it recovers. The ticket is still categorised, still prioritised, and
+      still triggered its notification. The model affects quality here, never availability.
+    </div>
+  </section>
+
+  <!-- ── 3. break it ───────────────────────────────────────────────────────── -->
+  <section id="breakSection" hidden>
+    <h2><span class="n">3</span> Try to break it</h2>
+    <p class="lede">Each button below is a genuine attempt to make the service lose or
+      duplicate work. Watch what comes back.</p>
+
+    <div class="attacks">
+      <button class="attack" data-attack="duplicate">
+        <b>Send the exact same request again</b>
+        <small>Upstream systems retry on timeout. Does it create a second ticket?</small>
+      </button>
+      <button class="attack" data-attack="conflict">
+        <b>Reuse the key with a different body</b>
+        <small>That's a client bug, not a retry. Should it be silently accepted?</small>
+      </button>
+      <button class="attack" data-attack="race">
+        <b>Fire 12 identical requests at once</b>
+        <small>A real race, not sequential retries. How many tickets result?</small>
+      </button>
+      <button class="attack" data-attack="badkey">
+        <b>Send an unusable key (<code>order:123</code>)</b>
+        <small>The key becomes a queue job id, and the queue rejects colons.</small>
+      </button>
+      <button class="attack" data-attack="flood">
+        <b>Flood it with 30 writes</b>
+        <small>It's a public endpoint. What stops someone filling the database?</small>
+      </button>
+    </div>
+
+    <div id="verdicts"></div>
+  </section>
+
+  <!-- ── 4. system state ───────────────────────────────────────────────────── -->
+  <section>
+    <h2><span class="n">4</span> What the operator sees</h2>
+    <p class="lede">Live from <code>/metrics</code>. Every place work can pile up unseen has
+      a gauge; every place the engine gives up has a counter.</p>
+
+    <div class="metrics" id="metrics">
+      <div class="metric"><span class="mv" id="m_accepted">–</span><span class="ml">accepted</span></div>
+      <div class="metric"><span class="mv" id="m_duplicate">–</span><span class="ml">duplicates absorbed</span></div>
+      <div class="metric"><span class="mv" id="m_conflict">–</span><span class="ml">conflicts rejected</span></div>
+      <div class="metric"><span class="mv" id="m_queue">–</span><span class="ml">queue waiting</span></div>
+      <div class="metric"><span class="mv" id="m_outbox">–</span><span class="ml">notifications pending</span></div>
+      <div class="metric alert"><span class="mv" id="m_dlq">–</span><span class="ml">dead letters</span></div>
+      <div class="metric alert"><span class="mv" id="m_abandoned">–</span><span class="ml">notifications abandoned</span></div>
+      <div class="metric"><span class="mv" id="m_breaker">–</span><span class="ml">circuit breaker</span></div>
+    </div>
+    <p class="note">The two red ones are what you would alert on: a job that failed
+      permanently, and an at-least-once guarantee knowingly given up. Both should be zero.</p>
+  </section>
+
+  <!-- ── log ───────────────────────────────────────────────────────────────── -->
+  <section>
+    <h2><span class="n">5</span> Every request you have made</h2>
+    <p class="lede">Raw HTTP, in order, with timings. Nothing here is simulated.</p>
+    <div id="log" class="log"><p class="empty">Nothing yet — send a ticket above.</p></div>
+  </section>
+
+  <footer>
+    <p>What you cannot trigger from a browser: a failing model degrading a ticket, a job
+      exhausting its retries into the dead-letter table, the outbox retrying a downstream
+      that returns 500s, or the sweep rescuing a ticket whose upgrade job was lost. Those
+      need fault injection and are covered by the integration suite, which runs the whole
+      stack against real Postgres and Redis.</p>
+    <p><a href="https://github.com/younesKAOUANI/triage-engine">Source, architecture notes and nine ADRs</a>
+      · <a href="/metrics">/metrics</a> · <a href="/dlq">/dlq</a> · <a href="/ready">/ready</a></p>
+  </footer>
+</main>
+
+<script src="/app.js"></script>
+</body>
+</html>

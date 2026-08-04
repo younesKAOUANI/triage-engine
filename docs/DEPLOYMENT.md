@@ -76,11 +76,35 @@ Migrations run on boot (`DB_RUN_MIGRATIONS_ON_BOOT=true`), which is safe with a
 single app container. If you ever scale to more than one, turn it off and run
 migrations as a separate step so instances don't race each other at startup.
 
-**5. Backups.**
+**5. Backups.** Install as root, in `/etc/cron.d`, so the running user is
+explicit rather than implied by whose crontab you happened to edit:
 
 ```bash
-crontab -e
-# 17 3 * * * cd /srv/triage-engine && ./deploy/backup.sh >> /var/log/triage-backup.log 2>&1
+sudo tee /etc/cron.d/triage-backup >/dev/null <<'CRON'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+17 3 * * * deploy cd /srv/triage-engine && ./deploy/backup.sh >> ./backups/backup.log 2>&1
+CRON
+sudo chmod 0644 /etc/cron.d/triage-backup
+```
+
+Two details that are easy to get wrong and fail silently:
+
+- **It must run as the account that owns `/srv/triage-engine` and is in the
+  `docker` group** — the same one CI deploys as. Run it as root instead and the
+  dumps land root-owned in a tree the deploy job runs `git checkout -f` in.
+- **The log goes inside `backups/`, not `/var/log`.** cron's shell opens the
+  redirect *before* exec'ing the script, so an unprivileged user redirecting into
+  a root-owned `/var/log` path fails with `EACCES` and the backup never runs at
+  all. With no MTA on the box that failure goes nowhere. `backups/` is owned by
+  the deploy user and is gitignored.
+
+Verify it rather than trusting it — a backup job that dies on its own redirect
+looks exactly like one that never fired:
+
+```bash
+sudo -u deploy bash -c 'cd /srv/triage-engine && ./deploy/backup.sh >> ./backups/backup.log 2>&1'
+ls -lt /srv/triage-engine/backups | head
 ```
 
 Redis is deliberately not backed up: it holds queue state, which the database and

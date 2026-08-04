@@ -2,6 +2,13 @@
 # The app waits for postgres/redis to pass their healthchecks before starting,
 # so a single `docker compose up` is enough for a cold boot.
 
+# Pinned, and deliberately NOT docker-compose.prod.yml's `triage-engine`.
+# Both files used to derive their project name from the directory, and on the
+# server that directory is /srv/triage-engine -- so the dev stack and the
+# production stack were the same compose project, and `make down` there ran
+# `docker compose down -v` against the live production volumes.
+name: triage-engine-dev
+
 services:
   postgres:
     image: postgres:16-alpine

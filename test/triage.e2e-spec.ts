@@ -439,6 +439,35 @@ describe('Triage engine (integration)', () => {
     }, 30000);
   });
 
+  // ── Public exposure of the bundled sink ──────────────────────────────────────
+  describe('sink exposure', () => {
+    it('reports totals but never enumerates dedup keys', async () => {
+      // A dedup key embeds the ticket id, so listing them would let an
+      // anonymous caller enumerate every ticket on the deployment and then read
+      // each one through GET /tickets/:id — subject, body and requester email.
+      await request(h.http)
+        .post('/_sink/webhook')
+        .set(
+          'Idempotency-Key',
+          'ticket:11111111-2222-3333-4444-555555555555:x:v1',
+        )
+        .send({ eventType: 'x' })
+        .expect(200);
+
+      const listed = await request(h.http).get('/_sink/deliveries').expect(200);
+      expect(listed.body).toHaveProperty('unique');
+      expect(listed.body).not.toHaveProperty('deliveries');
+      expect(JSON.stringify(listed.body)).not.toContain('11111111');
+
+      // A key you already hold still answers, which is all the demo needs.
+      const one = await request(h.http)
+        .get('/_sink/deliveries')
+        .query({ dedupKey: 'ticket:11111111-2222-3333-4444-555555555555:x:v1' })
+        .expect(200);
+      expect(one.body.count).toBe(1);
+    });
+  });
+
   // ── Reconciliation sweep (ADR-0009) ──────────────────────────────────────────
   describe('reconciliation', () => {
     it('re-drives a ticket whose upgrade job was lost', async () => {

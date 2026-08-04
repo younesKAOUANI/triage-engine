@@ -135,12 +135,16 @@ any number of instances.
 ## 7. Check the notification fired
 
 ```bash
-curl $BASE/_sink/deliveries
+curl "$BASE/_sink/deliveries?dedupKey=ticket:79e3a8af-…:ticket.triaged:v1"
 ```
 
 ```json
-{"unique":1,"deliveries":[{"dedupKey":"ticket:79e3a8af-…:ticket.triaged:v1","count":1}]}
+{"dedupKey":"ticket:79e3a8af-…:ticket.triaged:v1","count":1}
 ```
+
+You query a key you already hold. The endpoint does not list them, because a
+dedup key embeds the ticket id — listing them would let anyone enumerate every
+ticket on the deployment and read each one, submitter email included.
 
 The notification row is written in the *same transaction* as the ticket update,
 so a crash between "ticket updated" and "notification queued" is impossible. A

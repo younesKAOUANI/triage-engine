@@ -137,23 +137,27 @@ explain "The notification row is written in the same transaction as the ticket
 update, then a relay delivers it at-least-once against a dedup key. The bundled
 consumer collapses repeats, so one state change produces one delivery even if the
 relay retries."
-show "curl $BASE/_sink/deliveries"
+show "curl \"$BASE/_sink/deliveries?dedupKey=ticket:<id>:ticket.triaged:v1\""
 # The relay polls on an interval, so the delivery lands slightly after the
 # ticket is updated. Poll rather than reading once, or a slow relay looks
 # indistinguishable from a sink that isn't exposed.
-DELIV=""; FOUND=""
+DEDUP="ticket:$ID:ticket.triaged:v1"
+# The relay polls on an interval, so the delivery lands slightly after the
+# ticket is updated. Poll rather than reading once, or a slow relay looks
+# indistinguishable from a sink that isn't exposed.
+#
+# Queried by the key we already hold: the endpoint does not list keys, because
+# a dedup key embeds the ticket id and listing them would let anyone enumerate
+# every ticket on the deployment.
+COUNT=0; FOUND=""
 for _ in $(seq 1 15); do
-  DELIV=$(curl -s "$BASE/_sink/deliveries")
-  echo "$DELIV" | grep -q "$ID" && { FOUND=yes; break; }
-  echo "$DELIV" | grep -q '"deliveries"' || { FOUND=unavailable; break; }
+  RAW=$(curl -s "$BASE/_sink/deliveries?dedupKey=$DEDUP")
+  echo "$RAW" | grep -q '"count"' || { FOUND=unavailable; break; }
+  COUNT=$(echo "$RAW" | jsonf count)
+  [ "${COUNT:-0}" -ge 1 ] 2>/dev/null && { FOUND=yes; break; }
   sleep 1
 done
 if [ "$FOUND" = "yes" ]; then
-  COUNT=$(echo "$DELIV" | python3 -c "
-import sys,json
-d=json.load(sys.stdin)
-print(next((x['count'] for x in d.get('deliveries',[]) if '$ID' in x['dedupKey']), 0))
-" 2>/dev/null)
   check "delivered exactly once" 1 "$COUNT"
 elif [ "$FOUND" = "unavailable" ]; then
   echo "  (the bundled sink is not exposed on this deployment — skipped)"

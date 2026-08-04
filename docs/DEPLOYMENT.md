@@ -177,10 +177,22 @@ before rolling back across a schema change.
 
 **Restoring a backup.**
 
+Stop the app first: its open connections block the DROPs in a `--clean` dump.
+
 ```bash
+docker compose -f docker-compose.prod.yml stop app
+
 gunzip -c backups/triage-YYYYMMDDTHHMMSSZ.sql.gz \
-  | docker compose -f docker-compose.prod.yml exec -T postgres psql -U triage -d triage
+  | docker compose -f docker-compose.prod.yml exec -T postgres \
+      psql -v ON_ERROR_STOP=1 --single-transaction -U triage -d triage
+
+docker compose -f docker-compose.prod.yml start app
 ```
+
+`ON_ERROR_STOP=1` and `--single-transaction` are not optional. Without them psql
+continues past errors and exits 0, so a restore that drops every table and then
+fails to recreate them reports success — the failure only surfaces later, when
+the data is already gone.
 
 ## What to watch
 

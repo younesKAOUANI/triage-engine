@@ -50,5 +50,10 @@ echo "wrote $target ($(du -h "$target" | cut -f1))"
 find "$DEST" -name "${POSTGRES_DB}-*.sql.gz" -mtime "+${RETAIN_DAYS}" -print -delete
 
 # Restore, for when you need it and are not in a state to work it out:
-#   gunzip -c BACKUP.sql.gz | docker compose -f docker-compose.prod.yml \
-#     exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+#   docker compose -f docker-compose.prod.yml stop app
+#   gunzip -c BACKUP.sql.gz | docker compose -f docker-compose.prod.yml exec -T \
+#     postgres psql -v ON_ERROR_STOP=1 --single-transaction \
+#     -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+#   docker compose -f docker-compose.prod.yml start app
+# ON_ERROR_STOP is load-bearing: without it psql exits 0 after a failed restore
+# that has already dropped every table.

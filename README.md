@@ -6,8 +6,16 @@ An event-processing service that ingests support tickets, classifies them with a
 LLM, and notifies a downstream system. NestJS, Postgres, Redis/BullMQ, Mistral.
 
 Running at **[triage-engine.youneskaouani.dev](https://triage-engine.youneskaouani.dev)**
-— `/ready`, `/metrics` and `/dlq` are open, and `POST /events` accepts work
-(rate limited).
+— open it in a browser and it explains itself. `POST /events` accepts real work
+(rate limited); `/dlq`, `/metrics`, `/health` and `/ready` are readable.
+
+```bash
+./scripts/demo.sh https://triage-engine.youneskaouani.dev
+```
+
+walks every behaviour and checks each one, so it doubles as a smoke test. The
+same walkthrough written out, with what each step proves, is in
+[docs/DEMO.md](docs/DEMO.md).
 
 The classification itself is a few hundred lines. Most of this repo is the part
 that keeps working when things go wrong: duplicate deliveries, worker crashes

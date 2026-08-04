@@ -8,6 +8,7 @@ import { DatabaseModule } from './config/database.module';
 import { EnvVars } from './config/env.validation';
 import { EventsModule } from './events/events.module';
 import { HealthModule } from './health/health.module';
+import { LandingModule } from './landing/landing.module';
 import { IdempotencyModule } from './idempotency/idempotency.module';
 import { MetricsModule } from './observability/metrics.module';
 import { OutboxModule } from './outbox/outbox.module';
@@ -27,6 +28,7 @@ import { TicketsModule } from './tickets/tickets.module';
     RedisModule,
     MetricsModule,
     HealthModule,
+    LandingModule,
     RateLimitModule,
     RetentionModule,
 

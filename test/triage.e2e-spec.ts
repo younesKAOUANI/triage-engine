@@ -468,6 +468,46 @@ describe('Triage engine (integration)', () => {
     });
   });
 
+  // ── A fallback must never overwrite a real result ────────────────────────────
+  describe('enrichment precedence', () => {
+    it('a later degraded run does not overwrite an ENRICHED ticket', async () => {
+      // Get a genuine AI result first.
+      const res = await post(sampleBody, 'k-precedence').expect(202);
+      const id = res.body.ticketId;
+      const enriched = await waitFor(
+        () => getTicket(id).then((r) => r.body),
+        (t) => t.enrichment.status === 'ENRICHED',
+      );
+      expect(enriched.enrichment.source).toBe('AI');
+
+      // Now force a degraded reprocess of the same ticket, as a stale reconcile
+      // or a late retry would. The prior status it reads is irrelevant: the
+      // guard is re-evaluated inside the UPDATE.
+      h.mistral.setMode('fail');
+      const producer = h.app.get(PipelineProducer);
+      await producer.enqueueReplay(
+        {
+          idempotencyKey: 'k-precedence',
+          ticketId: id,
+          eventId: enriched.eventId,
+        },
+        randomUUID(),
+      );
+
+      // Give the job time to run and lose.
+      await new Promise((r) => setTimeout(r, 3000));
+      const after = await getTicket(id).then((r) => r.body);
+      expect(after.enrichment.status).toBe('ENRICHED');
+      expect(after.enrichment.source).toBe('AI');
+      expect(after.enrichment.confidence).toBe(enriched.enrichment.confidence);
+
+      // And no upgrade notification for a transition that never happened.
+      expect(
+        h.webhook.count(`ticket:${id}:ticket.enrichment_upgraded:v1`),
+      ).toBe(0);
+    }, 30000);
+  });
+
   // ── Reconciliation sweep (ADR-0009) ──────────────────────────────────────────
   describe('reconciliation', () => {
     it('re-drives a ticket whose upgrade job was lost', async () => {

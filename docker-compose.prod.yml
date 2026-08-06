@@ -43,6 +43,11 @@ services:
       # The bundled sink stands in for a real consumer. Point WEBHOOK_TARGET_URL
       # at the actual downstream when there is one.
       WEBHOOK_TARGET_URL: ${WEBHOOK_TARGET_URL:-http://app:3000/_sink/webhook}
+    # Docker SIGKILLs 10s after SIGTERM by default, which severs enrichment
+    # mid-flight on every deploy. The engine recovers — that is what the DLQ and
+    # the reconciliation sweep are for — but leaning on recovery for a routine
+    # restart is not the same as shutting down cleanly.
+    stop_grace_period: 60s
     init: true # reap zombies and forward SIGTERM so shutdown hooks run
     depends_on:
       postgres: { condition: service_healthy }

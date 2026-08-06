@@ -114,7 +114,7 @@ export class TicketProcessor extends WorkerHost {
     data: PipelineJobData,
   ): Promise<void> {
     await runInTransaction(this.dataSource, async (manager) => {
-      await manager
+      const update = manager
         .createQueryBuilder()
         .update(TicketEntity)
         .set({
@@ -127,8 +127,31 @@ export class TicketProcessor extends WorkerHost {
           enrichedAt: () => 'now()',
           enrichmentAttempts: () => '"enrichment_attempts" + 1',
         })
-        .where('id = :id', { id: ticket.id })
-        .execute();
+        .where('id = :id', { id: ticket.id });
+
+      // A non-ENRICHED outcome must never overwrite an ENRICHED one. The prior
+      // status was read before the enrichment call, so by the time we write, a
+      // concurrent upgrade may already have landed a real AI result — and a
+      // reconcile or a late retry arriving afterwards would replace it with a
+      // low-confidence fallback. Re-checking the status inside the UPDATE lets
+      // Postgres decide under the row lock rather than trusting the stale read.
+      if (outcome.status !== EnrichmentStatus.ENRICHED) {
+        update.andWhere('enrichment_status <> :enriched', {
+          enriched: EnrichmentStatus.ENRICHED,
+        });
+      }
+
+      const result = await update.execute();
+      if ((result.affected ?? 0) === 0) {
+        // Lost the race: the ticket is already ENRICHED and better than what we
+        // were about to write. Emitting now would announce a state change that
+        // did not happen.
+        this.logger.log(
+          { ticketId: ticket.id, wouldHaveWritten: outcome.status },
+          'skipped write; ticket is already enriched by a concurrent run',
+        );
+        return;
+      }
 
       // Emit the side effect warranted by the state transition (same transaction
       // as the update). Stable `version` so a reprocess/replay re-emits the same

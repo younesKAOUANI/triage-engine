@@ -91,7 +91,7 @@ h2 .num {
   color: var(--acc); margin-bottom: 2.5mm; text-transform: uppercase;
 }
 h3 {
-  font-size: 10.4pt; color: var(--ink); font-weight: 700; margin: 6mm 0 1.5mm;
+  font-size: 10.4pt; color: var(--ink); font-weight: 700; margin: 4.5mm 0 1.5mm;
   break-after: avoid;
 }
 .deck {
@@ -143,8 +143,8 @@ table.k td:first-child { width: 26%; }
 .card .breaks { color: var(--bad); }
 .card .swap { color: var(--mute); font-size: 7.9pt; }
 
-ul.tight { margin: 0 0 4mm; padding-left: 4.5mm; }
-ul.tight li { margin-bottom: 1.6mm; }
+ul.tight { margin: 0 0 3mm; padding-left: 4.5mm; font-size: 9.2pt; line-height: 1.52; }
+ul.tight li { margin-bottom: 1.1mm; }
 
 .note {
   font-size: 8.4pt; color: var(--mute); border-top: 1px solid var(--line);
@@ -513,27 +513,31 @@ ul.tight li { margin-bottom: 1.6mm; }
     </div>
 
     <div class="card">
-      <span class="tag good">Good fit</span>
-      <h4>Third-party webhook landing zone</h4>
-      <p>A single hardened front door for inbound integrations — accept quickly,
-        acknowledge, then do the real work behind a queue with retries you control
-        rather than the sender's.</p>
-      <p class="breaks">Doing the work inline means the sender times out and
-        resends, multiplying the load exactly when the system is already slow.</p>
-      <p class="swap">Usually nothing structural. Add signature verification at
-        ingestion and fan out by event type.</p>
+      <span class="tag strong">Strong fit</span>
+      <h4>Screening and verification lookups</h4>
+      <p>Sanctions, address, VAT, credit bureau. The processing seam is literally
+        "hand a record to a flaky external provider and get a verdict back with a
+        confidence" — the shape it was written for.</p>
+      <p class="breaks">The usual try-catch-and-continue lets records through
+        unscreened with no durable record that screening never happened, and every
+        provider recovery arrives as a stampede.</p>
+      <p class="swap">The fallback must return "unknown, provisional" rather than a
+        guess. Screening you invented is worse than screening you deferred.</p>
     </div>
 
     <div class="card">
-      <span class="tag good">Good fit</span>
-      <h4>Outbound notification and fan-out</h4>
-      <p>The delivery half is a general solution to "a thing happened in my
-        database and another system must hear about it exactly once", independent
-        of the rest of the pipeline.</p>
-      <p class="breaks">Sending from application code after a commit loses the
-        message whenever the process dies in the gap between the two.</p>
-      <p class="swap">Adopt the outbox and relay alone; the ingestion side is not
-        required for it to be useful.</p>
+      <span class="tag strong">Strong fit</span>
+      <h4>Alert and incident triage</h4>
+      <p>Monitoring systems deliver at-least-once, classification is slow, and the
+        paging path must not go quiet when the classifier's provider is caught in
+        the same outage you are trying to page about.</p>
+      <p class="breaks">A model on the paging path means a provider degradation
+        silently swallows alerts — and nothing is watching, because the alerting
+        system is what you would watch with.</p>
+      <p class="swap">Bind a severity and ownership classifier; shorten the
+        recovery intervals from minutes to seconds. The strongest fit of the six,
+        because what the engine lacks — authentication, ordering, tenancy — matters
+        least here.</p>
     </div>
   </div>
 
@@ -582,16 +586,35 @@ ul.tight li { margin-bottom: 1.6mm; }
     <li><strong>There is no tenancy model.</strong> One noisy source can consume
       capacity that others need. Per-tenant partitioning and backpressure would
       both be required before serving multiple customers from one deployment.</li>
-    <li><strong>Reads are not access-controlled.</strong> Anyone holding an item's
-      identifier can retrieve its contents. Acceptable for a demonstration;
-      unacceptable for real personal data without authentication in front.</li>
+    <li><strong>Nothing is authenticated.</strong> The only global guard is the
+      rate limiter. Anyone holding an item's identifier can read its contents, the
+      failure records expose stored payloads and stack traces, and every operator
+      action is unattributable. Acceptable for a demonstration; not for real data.</li>
+    <li><strong>The deduplication key is caller-chosen and unverified.</strong>
+      Someone who can guess a key can claim it first with different content; the
+      legitimate event then arrives, mismatches the stored hash, and is refused as a
+      client bug. Predictable keys — a provider's sequential event id — make that
+      worse, not better.</li>
+    <li><strong>Refusing a mismatched body cuts both ways.</strong> A sender whose
+      retry payload varies at all, by a retry counter or a re-serialised timestamp,
+      has its legitimate redelivery rejected rather than deduplicated.</li>
+    <li><strong>One notification per state transition, and no fan-out.</strong> The
+      version discriminator is fixed, so a second genuinely distinct effect for the
+      same item and event type is absorbed as a duplicate. There is a single
+      destination, with no routing by type or channel.</li>
   </ul>
 
   <h3>Known trade-offs</h3>
   <ul class="tight">
-    <li>The relay holds a row lock across the outbound call. Correct and simple at
-      moderate volume, and the wrong shape at high volume, where the fix is to
-      claim with a lease and deliver outside the transaction.</li>
+    <li>The relay dispatches an entire batch serially inside one transaction,
+      holding every row lock across every outbound call. Correct and simple at
+      moderate volume; the wrong shape at high volume, and an unexpected throw
+      mid-batch rolls back rows that were already delivered, so they are sent
+      again. The fix is to claim with a lease and deliver outside the transaction.</li>
+    <li>A completed item is announced whether the result came from the model or the
+      fallback. That is right for triage, where the point is that something was
+      classified at all — but any consumer that acts on the classification should
+      be gated on confidence rather than trusting the notification.</li>
     <li>The recovery sweep runs on every instance, so replicas duplicate the scan.
       Harmless but wasteful; a leader election would settle it.</li>
     <li>Processing is one item per call. Batching would reduce both cost and latency

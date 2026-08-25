@@ -73,3 +73,9 @@ prod-ps: ## Show production container status
 
 backup: ## Dump the production database to ./backups
 	./deploy/backup.sh
+
+overview: ## Render docs/overview.html to docs/triage-engine-overview.pdf
+	@command -v google-chrome >/dev/null || { echo "needs google-chrome (headless print-to-pdf)"; exit 1; }
+	google-chrome --headless --disable-gpu --no-sandbox --no-pdf-header-footer \
+		--print-to-pdf=docs/triage-engine-overview.pdf docs/overview.html
+	@echo "wrote docs/triage-engine-overview.pdf"

@@ -57,8 +57,12 @@ services:
     # exists so Postgres and Redis have no route off the box.
     networks:
       edge:
-        # Compose would otherwise only alias this container as `app` on a
-        # network three projects share. The edge Caddyfile routes to this name.
+        # The edge Caddyfile routes to this name. It does not make the container
+        # unambiguous: Compose also puts the service name (`app`) on the network,
+        # and a custom alias is appended, never substituted. `app` therefore
+        # still answers here, on a namespace four projects share -- which is why
+        # Vestige names its service `vestige-app` outright rather than relying on
+        # an alias to keep out of the way.
         aliases:
           - triage-app
       data: {}

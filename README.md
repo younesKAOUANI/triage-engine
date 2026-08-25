@@ -212,6 +212,18 @@ Full runbook, secrets, rollback and the metrics worth alerting on:
 
 ---
 
+## Reading about it
+
+- **[Overview (PDF)](docs/triage-engine-overview.pdf)** — what the service does,
+  how it behaves under failure, and where else the pattern applies. Written for
+  someone who wants the shape of it without reading code.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — the technical reference: data
+  model, every flow with line citations, the sharp edges.
+- [docs/adr/](docs/adr/) — nine decision records.
+- [docs/DEMO.md](docs/DEMO.md) — the walkthrough, as curl commands.
+
+---
+
 ## Tests
 
 ```bash

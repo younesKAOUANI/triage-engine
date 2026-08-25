@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Triage Engine — what it does and where it applies</title>
+<style>
+/*
+ * Print stylesheet for the overview PDF. Rendered with:
+ *   google-chrome --headless --print-to-pdf --no-pdf-header-footer docs/overview.html
+ *
+ * Fonts are restricted to what is present on a bare Linux box (Noto Sans,
+ * DejaVu Sans Mono) so the rendered PDF is identical wherever it is built,
+ * rather than silently falling back to something else in CI.
+ */
+@page { size: A4; margin: 20mm 18mm 18mm; }
+/* The cover is a full-bleed dark page, so it gets no page margin of its own and
+   supplies its own padding instead. Without this the panel floats inside a white
+   frame and reads as a card rather than a cover. */
+@page :first { margin: 0; }
+
+:root {
+  --ink:   #14161c;
+  --body:  #33384a;
+  --mute:  #6b7285;
+  --line:  #dfe2ea;
+  --acc:   #2f4bd8;
+  --acc-d: #1a2a7d;
+  --wash:  #f3f5fb;
+  --ok:    #14684a;
+  --bad:   #b3341f;
+  --warn:  #8a5a00;
+}
+
+* { box-sizing: border-box; }
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body {
+  margin: 0;
+  font-family: "Noto Sans", "Liberation Sans", sans-serif;
+  font-size: 9.6pt;
+  line-height: 1.62;
+  color: var(--body);
+}
+p { margin: 0 0 .62em; }
+strong { color: var(--ink); font-weight: 600; }
+code {
+  font-family: "DejaVu Sans Mono", monospace;
+  font-size: .86em;
+  background: var(--wash);
+  padding: .06em .3em;
+  border-radius: 2px;
+  color: var(--acc-d);
+}
+a { color: var(--acc); text-decoration: none; }
+
+/* ── cover ────────────────────────────────────────────────────────────────── */
+.cover {
+  break-after: page;
+  height: 297mm;          /* full A4; the first page has no margin */
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: var(--ink);
+  color: #fff;
+  padding: 46mm 22mm 26mm;
+}
+.cover .eyebrow {
+  font-size: 8.4pt; letter-spacing: .18em; text-transform: uppercase;
+  color: #8fa2ff; margin-bottom: 10mm;
+}
+.cover h1 {
+  font-size: 40pt; line-height: 1.02; margin: 0 0 6mm;
+  font-weight: 700; letter-spacing: -0.025em; color: #fff;
+}
+.cover .stand {
+  font-size: 13pt; line-height: 1.5; color: #c3c8d8; max-width: 118mm; font-weight: 300;
+}
+.cover .rule { height: 3px; width: 26mm; background: var(--acc); margin: 9mm 0; }
+.cover .meta { font-size: 8.6pt; color: #868da4; line-height: 1.9; }
+.cover .meta b { color: #d5d9e6; font-weight: 600; }
+
+/* ── structure ────────────────────────────────────────────────────────────── */
+section { break-before: page; }
+section.cont { break-before: auto; }
+
+h2 {
+  font-size: 17pt; line-height: 1.2; color: var(--ink); font-weight: 700;
+  letter-spacing: -0.015em; margin: 0 0 1mm; break-after: avoid;
+}
+h2 .num {
+  display: block; font-size: 8.4pt; letter-spacing: .16em; font-weight: 700;
+  color: var(--acc); margin-bottom: 2.5mm; text-transform: uppercase;
+}
+h3 {
+  font-size: 10.4pt; color: var(--ink); font-weight: 700; margin: 6mm 0 1.5mm;
+  break-after: avoid;
+}
+.deck {
+  font-size: 11pt; line-height: 1.55; color: var(--mute); font-weight: 300;
+  margin: 0 0 6mm; max-width: 140mm;
+}
+.lead::first-letter { /* no drop cap; kept deliberate and plain */ }
+
+/* ── components ───────────────────────────────────────────────────────────── */
+.quote {
+  border-left: 3px solid var(--acc);
+  background: var(--wash);
+  padding: 4mm 6mm;
+  margin: 5mm 0;
+  font-size: 10.6pt;
+  line-height: 1.5;
+  color: var(--ink);
+  break-inside: avoid;
+}
+.quote em { font-style: normal; color: var(--acc-d); font-weight: 600; }
+
+table { width: 100%; border-collapse: collapse; margin: 4mm 0 5mm; font-size: 8.8pt; }
+table.keep { break-inside: avoid; }
+th {
+  text-align: left; font-size: 7.6pt; text-transform: uppercase; letter-spacing: .1em;
+  color: var(--mute); font-weight: 700; padding: 0 4mm 2mm 0;
+  border-bottom: 1.5px solid var(--ink);
+}
+td { padding: 2.6mm 4mm 2.6mm 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr { break-inside: avoid; }
+td:first-child { color: var(--ink); font-weight: 600; width: 34%; }
+table.k td:first-child { width: 26%; }
+
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3mm; margin: 3mm 0; }
+.card {
+  border: 1px solid var(--line); border-radius: 3px; padding: 3.2mm 3.6mm;
+  break-inside: avoid;
+}
+.card h4 {
+  margin: 0 0 1.2mm; font-size: 9.2pt; color: var(--ink); font-weight: 700;
+}
+.card p { margin: 0 0 1.2mm; font-size: 8.2pt; line-height: 1.5; }
+.card .tag {
+  display: inline-block; font-size: 7pt; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 700; padding: .5mm 1.6mm; border-radius: 2px; margin-bottom: 2mm;
+}
+.tag.strong { background: #e3f0e9; color: var(--ok); }
+.tag.good   { background: var(--wash); color: var(--acc-d); }
+.card .breaks { color: var(--bad); }
+.card .swap { color: var(--mute); font-size: 7.9pt; }
+
+ul.tight { margin: 0 0 4mm; padding-left: 4.5mm; }
+ul.tight li { margin-bottom: 1.6mm; }
+
+.note {
+  font-size: 8.4pt; color: var(--mute); border-top: 1px solid var(--line);
+  padding-top: 2.5mm; margin-top: 5mm;
+}
+.kicker {
+  font-size: 7.6pt; text-transform: uppercase; letter-spacing: .12em;
+  color: var(--acc); font-weight: 700; margin: 0 0 2mm;
+}
+.two { column-count: 2; column-gap: 8mm; }
+.two p { margin-bottom: .7em; }
+</style>
+</head>
+<body>
+
+<!-- ══ COVER ═══════════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <div>
+    <div class="eyebrow">Systems overview</div>
+    <h1>Triage&nbsp;Engine</h1>
+    <div class="rule"></div>
+    <p class="stand">An event-processing service built around a single requirement:
+      that no piece of work is ever lost quietly. What it does, how it holds that
+      promise when things fail, and where else the pattern applies.</p>
+  </div>
+  <div class="meta">
+    <b>Younes Kaouani</b><br>
+    triage-engine.youneskaouani.dev<br>
+    github.com/younesKAOUANI/triage-engine
+  </div>
+</div>
+
+<!-- ══ 1. WHAT IT IS ═══════════════════════════════════════════════════════ -->
+<section class="cont">
+  <h2><span class="num">01 — What it is</span>A service that accepts work and refuses to lose it</h2>
+
+  <p class="deck">In its current form it triages support tickets: it accepts them,
+    classifies each one with a language model, and notifies a downstream system.
+    That description undersells it, because the classification is roughly four
+    hundred lines and the rest of the system exists to survive everything that
+    can go wrong around it.</p>
+
+  <div class="two">
+    <p>The service exposes one meaningful entry point. A client posts an event —
+      a subject, a body, an optional email address. The response comes back in
+      milliseconds with an identifier and a <code>202</code>, because the work has
+      been <em>accepted</em>, not completed. Moments later the item has a category,
+      a priority, a one-line summary and a confidence score, and a downstream system
+      has been told about it exactly once.</p>
+
+    <p>Between those two moments sits the part that matters. The event is written
+      to a database alongside a record of the key it arrived under. A job is queued.
+      A worker picks it up, calls a language model, and writes the result and the
+      outbound notification in a single transaction. A separate process delivers
+      that notification, retrying until the other side acknowledges it.</p>
+
+    <p>Every one of those steps can fail, and several of them can fail in ways that
+      are invisible unless you plan for them. The caller can send the same event
+      twelve times. Two copies can arrive in the same millisecond. The worker can
+      die halfway through. The model can time out, or return confident nonsense
+      that does not match the expected shape. The downstream system can return
+      errors for an hour.</p>
+
+    <p>None of those situations may result in a duplicate, and none of them may
+      result in something disappearing without a trace. That constraint is the
+      product. Everything in the architecture follows from it.</p>
+  </div>
+
+  <div class="quote">
+    The organising principle is <em>nothing is ever silently lost</em>. Both halves
+    carry weight. Work must always end up somewhere durable and queryable. And when
+    giving up is genuinely unavoidable, it must be visible — every abandonment path
+    increments a counter built to be alerted on.
+  </div>
+</section>
+
+<!-- ══ 2. THE PROBLEM ══════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">02 — The problem</span>Why this is harder than it looks</h2>
+
+  <p class="deck">Systems that send you events retry when they do not hear back
+    quickly enough. They cannot tell the difference between a request that was lost
+    and a response that was lost, so they resend. This is not an edge case; it is
+    the normal operating mode of every webhook, message broker and integration
+    partner you will ever work with.</p>
+
+  <h3>At-least-once delivery is the default, everywhere</h3>
+  <p>The consequence is that your handler will be called more than once for the
+    same logical event, sometimes concurrently. If handling it has any side effect —
+    a charge, an email, a row, a downstream call — then handling it twice does that
+    side effect twice. The naive fix is to check whether you have seen the event
+    before, and the naive check has a race in it: two requests both look, both find
+    nothing, and both proceed.</p>
+
+  <h3>Then the middle of your pipeline fails</h3>
+  <p>Meanwhile the interesting work is slow and unreliable. A model call takes
+    seconds and sometimes never returns. Doing it inside the request would tie up a
+    connection and time out the caller, so it moves to a queue — and now there is a
+    gap between "we accepted this" and "we finished it" in which the process can
+    restart. Whatever was in flight has to be recoverable from durable state, not
+    from memory.</p>
+
+  <h3>And the failures are the quiet kind</h3>
+  <p>The failure that matters is not the one that returns a 500. It is the one
+    where the database says the item was processed, the downstream system never
+    heard about it, and nothing anywhere records the discrepancy. Nobody notices
+    until a customer asks why they never got a reply. By then the evidence is gone.</p>
+
+  <table class="k">
+    <tr><th>What goes wrong</th><th>What it costs if unhandled</th></tr>
+    <tr><td>Duplicate delivery</td><td>The same work performed twice, with every side effect repeated.</td></tr>
+    <tr><td>Two copies at once</td><td>A race that a naive "have I seen this?" check does not close.</td></tr>
+    <tr><td>Crash mid-processing</td><td>Half-written state, and an item that no longer appears anywhere as outstanding.</td></tr>
+    <tr><td>Commit succeeds, notify fails</td><td>Internally complete, externally invisible. The hardest class to detect.</td></tr>
+    <tr><td>Dependency unavailable</td><td>Either the item is dropped, or the whole intake stalls behind it.</td></tr>
+    <tr><td>Retries exhausted</td><td>The item vanishes from the queue with no durable record of why.</td></tr>
+  </table>
+</section>
+
+<!-- ══ 3. HOW IT WORKS ═════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">03 — How it works</span>The path an event takes</h2>
+
+  <p class="deck">Five stages, each with a specific job. The interesting design is
+    in the boundaries between them rather than in any one stage.</p>
+
+  <svg viewBox="0 0 720 300" width="100%" style="margin:2mm 0 5mm">
+    <defs>
+      <marker id="a" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+        <path d="M0,0 L7,3.5 L0,7 z" fill="#8b93a8"/>
+      </marker>
+      <marker id="ar" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+        <path d="M0,0 L7,3.5 L0,7 z" fill="#b3341f"/>
+      </marker>
+    </defs>
+    <g font-family="Noto Sans, sans-serif">
+      <!-- row 1 -->
+      <rect x="2" y="26" width="96" height="40" rx="3" fill="#f3f5fb" stroke="#dfe2ea"/>
+      <text x="50" y="43" font-size="10" font-weight="700" fill="#14161c" text-anchor="middle">Client</text>
+      <text x="50" y="56" font-size="8" fill="#6b7285" text-anchor="middle">POST /events</text>
+
+      <line x1="100" y1="46" x2="132" y2="46" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <rect x="136" y="20" width="120" height="52" rx="3" fill="#fff" stroke="#2f4bd8" stroke-width="1.4"/>
+      <text x="196" y="38" font-size="10" font-weight="700" fill="#14161c" text-anchor="middle">Claim the key</text>
+      <text x="196" y="51" font-size="7.6" fill="#6b7285" text-anchor="middle">UNIQUE + ON CONFLICT</text>
+      <text x="196" y="62" font-size="7.6" fill="#6b7285" text-anchor="middle">settles the race in Postgres</text>
+
+      <line x1="258" y1="46" x2="290" y2="46" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <rect x="294" y="20" width="120" height="52" rx="3" fill="#fff" stroke="#dfe2ea"/>
+      <text x="354" y="38" font-size="10" font-weight="700" fill="#14161c" text-anchor="middle">Store &amp; queue</text>
+      <text x="354" y="51" font-size="7.6" fill="#6b7285" text-anchor="middle">event + item in one</text>
+      <text x="354" y="62" font-size="7.6" fill="#6b7285" text-anchor="middle">transaction, then enqueue</text>
+
+      <line x1="416" y1="46" x2="448" y2="46" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <rect x="452" y="20" width="120" height="52" rx="3" fill="#fff" stroke="#dfe2ea"/>
+      <text x="512" y="38" font-size="10" font-weight="700" fill="#14161c" text-anchor="middle">Enrich</text>
+      <text x="512" y="51" font-size="7.6" fill="#6b7285" text-anchor="middle">model call, timed out,</text>
+      <text x="512" y="62" font-size="7.6" fill="#6b7285" text-anchor="middle">retried, breakered</text>
+
+      <line x1="574" y1="46" x2="606" y2="46" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="610" y="26" width="106" height="40" rx="3" fill="#f3f5fb" stroke="#dfe2ea"/>
+      <text x="663" y="43" font-size="9" font-weight="700" fill="#14161c" text-anchor="middle">Fallback</text>
+      <text x="663" y="56" font-size="7.6" fill="#6b7285" text-anchor="middle">if unavailable</text>
+
+      <!-- down to tx2 -->
+      <line x1="512" y1="74" x2="512" y2="108" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <!-- row 2: the single transaction -->
+      <rect x="294" y="112" width="278" height="54" rx="3" fill="#fff" stroke="#2f4bd8" stroke-width="1.4"/>
+      <text x="433" y="131" font-size="10" font-weight="700" fill="#14161c" text-anchor="middle">One transaction</text>
+      <text x="433" y="145" font-size="7.8" fill="#6b7285" text-anchor="middle">the result AND the outbound notification</text>
+      <text x="433" y="156" font-size="7.8" fill="#6b7285" text-anchor="middle">commit together, or neither exists</text>
+
+      <line x1="294" y1="139" x2="248" y2="139" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="136" y="119" width="108" height="40" rx="3" fill="#f3f5fb" stroke="#dfe2ea"/>
+      <text x="190" y="136" font-size="9" font-weight="700" fill="#14161c" text-anchor="middle">Database</text>
+      <text x="190" y="149" font-size="7.6" fill="#6b7285" text-anchor="middle">source of truth</text>
+
+      <!-- down to relay -->
+      <line x1="433" y1="168" x2="433" y2="200" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <!-- row 3 -->
+      <rect x="330" y="204" width="206" height="50" rx="3" fill="#fff" stroke="#dfe2ea"/>
+      <text x="433" y="222" font-size="10" font-weight="700" fill="#14161c" text-anchor="middle">Relay</text>
+      <text x="433" y="235" font-size="7.8" fill="#6b7285" text-anchor="middle">claims work with SKIP LOCKED,</text>
+      <text x="433" y="246" font-size="7.8" fill="#6b7285" text-anchor="middle">delivers until acknowledged</text>
+
+      <line x1="538" y1="229" x2="576" y2="229" stroke="#8b93a8" stroke-width="1.4" marker-end="url(#a)"/>
+      <rect x="580" y="209" width="136" height="40" rx="3" fill="#f3f5fb" stroke="#dfe2ea"/>
+      <text x="648" y="226" font-size="9" font-weight="700" fill="#14161c" text-anchor="middle">Downstream</text>
+      <text x="648" y="239" font-size="7.6" fill="#6b7285" text-anchor="middle">dedupes on a stable key</text>
+
+      <!-- recovery -->
+      <path d="M330,229 L250,229 L250,272 L60,272" fill="none" stroke="#b3341f" stroke-width="1.2"
+            stroke-dasharray="3,2.5" marker-end="url(#ar)"/>
+      <rect x="2" y="252" width="140" height="40" rx="3" fill="#fdf1ee" stroke="#e8c4bb"/>
+      <text x="72" y="269" font-size="9" font-weight="700" fill="#b3341f" text-anchor="middle">Recovery paths</text>
+      <text x="72" y="282" font-size="7.4" fill="#8a5548" text-anchor="middle">dead letters · replay · sweep</text>
+    </g>
+  </svg>
+
+  <h3>What each boundary is doing</h3>
+  <table>
+    <tr><th>Stage</th><th>The decision it makes</th></tr>
+    <tr><td>Claim the key</td><td>Whether this is new work, a duplicate of finished work, a duplicate of work in progress, or the same key being reused for different content. Decided by the database, not by application code, so it stays correct under concurrency and across any number of instances.</td></tr>
+    <tr><td>Store &amp; queue</td><td>The raw event and the derived item are written together. The job identifier is the caller's own key, so re-delivery cannot enqueue the same work twice.</td></tr>
+    <tr><td>Enrich</td><td>Call the model with a hard timeout, retry with jitter, and stop calling it entirely once a circuit breaker sees it failing. Validate the response against a schema — valid JSON is not the same as correct content.</td></tr>
+    <tr><td>One transaction</td><td>The result and the outbound notification commit together. This is the step that removes the "saved but never announced" failure entirely, rather than making it less likely.</td></tr>
+    <tr><td>Relay</td><td>Claims pending notifications with a lock that lets multiple instances work the same table without coordinating, and delivers with retries against a stable key the receiver can deduplicate on.</td></tr>
+  </table>
+</section>
+
+<!-- ══ 4. GUARANTEES ═══════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">04 — Guarantees</span>What it promises, and what enforces it</h2>
+
+  <p class="deck">Each promise below is held by a specific mechanism, not by
+    convention or by care. That distinction matters: the point of building it this
+    way is that the guarantee survives a developer who has never read this document.</p>
+
+  <table>
+    <tr><th>Promise</th><th>What enforces it</th></tr>
+    <tr><td>The same event never produces two items</td>
+        <td>A unique constraint plus a conditional insert. Exactly one of any number of simultaneous callers wins; the rest are told the work is already done or already running.</td></tr>
+    <tr><td>Reusing a key for different content is refused</td>
+        <td>The key is matched against a hash of the content, so a genuine client bug surfaces as a conflict rather than being silently absorbed.</td></tr>
+    <tr><td>A completed item is always announced</td>
+        <td>The notification row is written in the same transaction as the result. There is deliberately no way to emit one outside a transaction, so the pattern cannot be bypassed by accident.</td></tr>
+    <tr><td>Notifications survive a crash</td>
+        <td>Delivery happens inside the transaction that marks the row sent. A process that dies mid-flight rolls back and redelivers later.</td></tr>
+    <tr><td>Work that fails permanently is kept</td>
+        <td>It lands in a queryable table with the original payload, the error, the stack and the attempt count — and can be replayed through its original key, so replaying cannot duplicate anything.</td></tr>
+    <tr><td>An unavailable dependency does not stop intake</td>
+        <td>A deterministic fallback produces a usable result immediately, flagged with low confidence, and a better attempt is queued for when the dependency recovers.</td></tr>
+    <tr><td>Nothing stays stuck</td>
+        <td>A periodic sweep treats the database as the source of truth and re-drives anything left in a degraded state, closing the case where the recovery job itself was lost.</td></tr>
+  </table>
+
+  <div class="quote">
+    Giving up is sometimes correct. A downstream system that has rejected a
+    notification twenty times may genuinely be gone. What is never acceptable is
+    giving up <em>without saying so</em> — so each of those paths increments a
+    counter that exists specifically to be alerted on.
+  </div>
+</section>
+
+<!-- ══ 5. FAILURE ══════════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">05 — Under failure</span>What actually happens when things break</h2>
+
+  <p class="deck">The behaviour below is not aspirational. Each case is covered by
+    an automated test that runs the whole system against a real database and a real
+    queue, with only the outbound network calls faked.</p>
+
+  <h3>The model is down</h3>
+  <p>Calls are timed out and retried a few times with jitter. If failures continue,
+    a circuit breaker opens and further calls are skipped entirely rather than
+    piling up against something known to be broken. The item is classified by a
+    deterministic rule-based classifier instead, marked as a degraded result with
+    low confidence, and a second attempt is scheduled for later on a staggered
+    delay so that recovery does not arrive as a stampede. <strong>Intake never
+    stops.</strong> The model affects quality, never availability.</p>
+
+  <h3>The model returns something wrong-shaped</h3>
+  <p>Every response is validated against a strict schema. A response that is
+    valid JSON but has an unexpected category, a missing field or an out-of-range
+    confidence is treated exactly like a network failure: retried, then degraded.
+    Bad data never reaches storage.</p>
+
+  <h3>A worker dies mid-item</h3>
+  <p>The queue returns the job to the pool. Because the item's identity comes from
+    the caller's key rather than from anything in memory, the retry reprocesses the
+    same item rather than creating a second one. If it exhausts its attempts —
+    including the several ways a queue can retire a job early, which are easy to
+    miss and were the subject of a specific fix — it is recorded as a dead letter
+    with full context rather than disappearing.</p>
+
+  <h3>The downstream system is failing</h3>
+  <p>Notifications accumulate as pending rows and are retried on a backoff. A
+    growing pending count is visible as a gauge. If one exhausts its attempts it is
+    marked terminal and a counter increments — the deliberate, visible form of
+    giving up.</p>
+
+  <h3>Someone abuses the public endpoint</h3>
+  <p>Writes are rate limited per caller. Health checks, metrics and the internal
+    delivery target are exempt, because a throttled health check reads as an outage
+    and a throttled delivery target would throttle the system's own notifications.
+    Data past a retention window is pruned automatically, and only settled records
+    are eligible — anything still in flight is never removed regardless of age.</p>
+</section>
+
+<!-- ══ 6. APPLICATIONS ═════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">06 — Applications</span>Where else this shape fits</h2>
+
+  <p class="deck">Support tickets are an illustration, not the point. Strip the
+    domain away and what remains is a general pattern, and the pattern is worth
+    recognising because a surprising number of production systems are instances of
+    it without anyone having named it.</p>
+
+  <div class="quote">
+    <em>Accept an event you did not originate and cannot trust to arrive once.
+    Do something slow and failure-prone with it. Then tell another system, exactly
+    once, that it happened.</em> Anywhere those three sentences are true, the
+    machinery here applies almost unchanged.
+  </div>
+
+  <p>What changes between domains is small and well isolated: the processing step
+    sits behind a single interface, and the notification target is a URL. Everything
+    else — the deduplication ledger, the transactional handoff, the dead-letter
+    table, the recovery sweep — is domain-agnostic.</p>
+
+  <p class="kicker">Where the machinery earns its complexity</p>
+
+  <div class="grid">
+    <div class="card">
+      <span class="tag strong">Strong fit</span>
+      <h4>Payment and billing webhooks</h4>
+      <p>Payment providers retry aggressively and make no promise about delivering
+        once. Every provider's own documentation tells you to deduplicate on the
+        event id, which is precisely the ledger here.</p>
+      <p class="breaks">Processing a charge twice refunds twice, fulfils twice, or
+        posts the same amount to a ledger twice. Unwinding it is manual and
+        customer-visible.</p>
+      <p class="swap">Swap the processing step for reconciliation or ledger
+        posting; point the notification at the order system.</p>
+    </div>
+
+    <div class="card">
+      <span class="tag strong">Strong fit</span>
+      <h4>Order and fulfilment intake</h4>
+      <p>Orders arrive from storefronts, marketplaces and partner APIs that resend
+        on timeout. The processing step — pricing, stock allocation, fraud scoring —
+        is slow and depends on services that fail independently.</p>
+      <p class="breaks">A duplicate order ships twice and decrements stock twice.
+        A lost notification means a paid order the warehouse never sees.</p>
+      <p class="swap">Enrichment becomes allocation and scoring; the notification
+        goes to the warehouse or ERP.</p>
+    </div>
+
+    <div class="card">
+      <span class="tag strong">Strong fit</span>
+      <h4>Document intake: claims, KYC, invoices</h4>
+      <p>Extraction is slow, occasionally wrong, and increasingly done by a model.
+        The immutable record of the original submission and the ability to replay a
+        failure are regulatory requirements here, not conveniences.</p>
+      <p class="breaks">A submission that disappears between upload and review is a
+        compliance incident, and one nobody can reconstruct after the fact.</p>
+      <p class="swap">Enrichment becomes OCR plus extraction; the low-confidence
+        path routes to human review instead of a rule-based guess.</p>
+    </div>
+
+    <div class="card">
+      <span class="tag strong">Strong fit</span>
+      <h4>Moderation and classification queues</h4>
+      <p>The clearest match for the degrade-then-upgrade behaviour. When the model
+        is unavailable you do not want intake to stop — you want a conservative
+        provisional decision now and the real one shortly after.</p>
+      <p class="breaks">Blocking on the model means submissions queue unreviewed;
+        skipping it means unreviewed content goes live.</p>
+      <p class="swap">The fallback becomes "hold pending review" rather than a
+        keyword classifier.</p>
+    </div>
+
+    <div class="card">
+      <span class="tag good">Good fit</span>
+      <h4>Third-party webhook landing zone</h4>
+      <p>A single hardened front door for inbound integrations — accept quickly,
+        acknowledge, then do the real work behind a queue with retries you control
+        rather than the sender's.</p>
+      <p class="breaks">Doing the work inline means the sender times out and
+        resends, multiplying the load exactly when the system is already slow.</p>
+      <p class="swap">Usually nothing structural. Add signature verification at
+        ingestion and fan out by event type.</p>
+    </div>
+
+    <div class="card">
+      <span class="tag good">Good fit</span>
+      <h4>Outbound notification and fan-out</h4>
+      <p>The delivery half is a general solution to "a thing happened in my
+        database and another system must hear about it exactly once", independent
+        of the rest of the pipeline.</p>
+      <p class="breaks">Sending from application code after a commit loses the
+        message whenever the process dies in the gap between the two.</p>
+      <p class="swap">Adopt the outbox and relay alone; the ingestion side is not
+        required for it to be useful.</p>
+    </div>
+  </div>
+
+  <h3>Where it would be the wrong choice</h3>
+  <p>Two cases are worth naming, because the pattern is easy to over-apply. <strong>High-volume
+    telemetry</strong> — clickstreams, device readings, log shipping — writes a durable
+    row and runs a transaction per event, which is far too heavy above a few hundred
+    events per second; a stream processor is the right tool and duplicate readings
+    usually do not matter anyway. And <strong>anything requiring strict ordering per
+    entity</strong> is not served by this at all: items are processed concurrently, so
+    "apply these three updates to account X in sequence" needs partitioning the
+    engine does not have.</p>
+
+  <h3>What you would keep, and what you would replace</h3>
+  <table class="k keep">
+    <tr><th>Component</th><th>Domain-specific?</th></tr>
+    <tr><td>Deduplication ledger</td><td>No. Identical in every application above.</td></tr>
+    <tr><td>Transactional handoff</td><td>No. The mechanism is the same whatever the payload.</td></tr>
+    <tr><td>Delivery relay</td><td>No. Only the destination URL changes.</td></tr>
+    <tr><td>Dead letters and replay</td><td>No. The stored payload is opaque to it.</td></tr>
+    <tr><td>Recovery sweep</td><td>Mostly. It scans for a specific stalled state, which you would name for your own workflow.</td></tr>
+    <tr><td>The processing step</td><td><strong>Yes.</strong> This is the part you write. It sits behind one interface, and substituting it is a binding change rather than a rewrite.</td></tr>
+    <tr><td>The fallback</td><td><strong>Yes.</strong> What "degraded but usable" means is a domain judgement — a cautious guess, a hold, or a human queue.</td></tr>
+  </table>
+</section>
+
+<!-- ══ 7. LIMITS ═══════════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">07 — Limits</span>What it is not, and when not to reach for it</h2>
+
+  <p class="deck">A description of a system that only lists strengths is marketing.
+    These are the boundaries a competent reviewer would find within an hour, stated
+    plainly.</p>
+
+  <h3>Deliberate scope decisions</h3>
+  <ul class="tight">
+    <li><strong>It is not a workflow engine.</strong> The pipeline is one linear
+      path. Branching, human approval steps, compensation and long-running
+      sagas are out of scope; something like Temporal exists for that.</li>
+    <li><strong>Ordering is not guaranteed.</strong> Items are processed
+      concurrently. Where strict per-entity sequencing matters, this needs
+      partitioning it does not currently have.</li>
+    <li><strong>Delivery is at-least-once, not exactly-once.</strong> The receiver
+      must deduplicate on the supplied key. That is a genuine requirement placed on
+      the consumer, not a detail to skip past.</li>
+    <li><strong>There is no tenancy model.</strong> One noisy source can consume
+      capacity that others need. Per-tenant partitioning and backpressure would
+      both be required before serving multiple customers from one deployment.</li>
+    <li><strong>Reads are not access-controlled.</strong> Anyone holding an item's
+      identifier can retrieve its contents. Acceptable for a demonstration;
+      unacceptable for real personal data without authentication in front.</li>
+  </ul>
+
+  <h3>Known trade-offs</h3>
+  <ul class="tight">
+    <li>The relay holds a row lock across the outbound call. Correct and simple at
+      moderate volume, and the wrong shape at high volume, where the fix is to
+      claim with a lease and deliver outside the transaction.</li>
+    <li>The recovery sweep runs on every instance, so replicas duplicate the scan.
+      Harmless but wasteful; a leader election would settle it.</li>
+    <li>Processing is one item per call. Batching would reduce both cost and latency
+      where the underlying dependency supports it.</li>
+  </ul>
+
+  <h3>When to reach for something simpler</h3>
+  <p>If the work is fast, idempotent by nature, and has no side effect outside your
+    own database, this is more machinery than the problem deserves. A plain handler
+    and a unique constraint will do. The complexity here earns its place only when
+    the processing step is genuinely unreliable <em>and</em> the side effect is
+    genuinely hard to undo. When only one of those is true, take half the pattern.</p>
+</section>
+
+<!-- ══ 8. SEE IT ═══════════════════════════════════════════════════════════ -->
+<section>
+  <h2><span class="num">08 — Seeing it work</span>A running deployment, not a description</h2>
+
+  <p class="deck">The system is deployed and public. The page below is not a
+    marketing site; it drives the real service and shows what comes back.</p>
+
+  <table class="k">
+    <tr><th>Where</th><th>What you get</th></tr>
+    <tr><td>Interactive demo</td><td><strong>triage-engine.youneskaouani.dev</strong> — submit an item and watch it move through the pipeline, then use the buttons that deliberately try to break the guarantees: resend the identical request, reuse a key with different content, fire twelve simultaneous copies, flood the endpoint. Each reports what came back and why it held.</td></tr>
+    <tr><td>Live signals</td><td><code>/metrics</code> exposes the counters and gauges described throughout this document, including the two that indicate work was abandoned.</td></tr>
+    <tr><td>Failure records</td><td><code>/dlq</code> lists anything that failed permanently, with the context needed to decide what to do about it.</td></tr>
+    <tr><td>Source and reasoning</td><td>The repository contains the full architecture reference and nine decision records covering the choices that were genuinely contested, including the ones that turned out to be wrong.</td></tr>
+  </table>
+
+  <h3>How it is built and run</h3>
+  <p>TypeScript on NestJS, PostgreSQL for state, Redis for the queue, a language
+    model for classification. It runs as containers behind a reverse proxy on a
+    single host; the datastores have no route off the machine. Every push to the
+    main branch runs the full test suite against a real database and queue, builds
+    an image, deploys it pinned to that exact commit, and then verifies the new
+    version is serving before the run is allowed to report success.</p>
+
+  <p class="note">Written by Younes Kaouani. The claims in this document about
+    behaviour under failure correspond to automated tests in the repository; where
+    something is aspirational or unbuilt, it is described as such in section 07.</p>
+</section>
+
+</body>
+</html>
